@@ -6,12 +6,12 @@
 
 <br />
 
-**Persistent, shared agent memory as MCP infrastructure.**
+**Multi-agent memory consistency for engineering teams.**
 
 <br />
 
 [![Status](https://img.shields.io/badge/status-early%20development-orange?style=flat-square)](https://github.com/Agentscreator/Engram)
-[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](./LICENSE)
 [![MCP Compatible](https://img.shields.io/badge/MCP-compatible-8b5cf6?style=flat-square)](https://modelcontextprotocol.io)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](./CONTRIBUTING.md)
 
@@ -21,153 +21,133 @@
 
 ---
 
-Every agent session starts from zero.
+Engram is an MCP server that gives your agents a shared, persistent knowledge base — one that survives across sessions, syncs across engineers, and detects when two agents develop contradictory beliefs about the same codebase.
 
-No memory of why a decision was made last week. No record of which approaches already failed. No awareness of the constraints that are non-negotiable. Another engineer's agent re-discovered the same thing the day before. That knowledge evaporated when the session ended.
-
-**Engram fixes that.**
+> Individual agent memory is solved. Engram solves what happens when multiple agents need to agree on what's true.
 
 <br />
 
-## 🌿 The Problem
+## The problem
+
+Every agent session starts from zero. Your agent re-discovers why that architectural decision was made, re-learns which approaches already failed, re-figures out which constraints are non-negotiable.
+
+Another engineer's agent did the same thing last week.
+
+Existing memory tools fix this for one engineer and one agent. Engram fixes it for your whole team — and catches the moment two agents start believing contradictory things about the same system.
+
+<br />
+
+## How it works
+
+Engram exposes three MCP tools:
+
+**`engram_query(topic)`**
+Before starting work, pull what your team's agents collectively know about what you're about to touch. Structured facts, ordered by relevance and recency.
+
+**`engram_commit(fact, scope, confidence)`**
+When your agent discovers something worth preserving — a hidden side effect, a failed approach, an undocumented constraint — write it. Append-only, timestamped, permanently traceable.
+
+**`engram_conflicts()`**
+Returns pairs of committed facts that semantically contradict each other. Not an error — a structured artifact. Reviewable, resolvable, auditable.
+
+<br />
+
+## Quick start
+
+### Requirements
+- Python 3.11+
+- Any MCP-compatible agent (Claude Code, Cursor, Windsurf)
+
+### Install
 
 ```
-Day 1 — Agent A discovers: "Don't touch the auth middleware.
-         Session token format changed. Old code breaks mobile."
-
-Day 3 — Agent B touches the auth middleware.
-         Re-discovers it the hard way.
-
-Day 7 — Agent C touches the auth middleware.
+pip install engram-mcp
 ```
 
-This is not a hypothetical. This is the default state of every multi-agent, multi-session codebase today. Knowledge is generated constantly — and lost constantly.
-
-<br />
-
-## 🍃 What Engram Does
-
-Engram is an **MCP server** that gives your agents a shared, versioned knowledge base that persists across sessions. When an agent discovers something real — a hidden side effect, a failed approach, an undocumented constraint — it commits that to Engram.
-
-The next agent, in a separate session days later, pulls that fact before touching the relevant code.
-
-> It does not re-discover. It builds on.
-
-<br />
-
-## 🌱 API Surface
-
-Engram exposes three tools any MCP-compatible agent can call:
-
-<br />
-
-### `query(topic)`
-
-```typescript
-// Before beginning work, pull what is already known.
-const facts = await engram.query("auth middleware");
-
-// Returns: relevant facts, past decisions, known constraints,
-// confidence levels, and the context behind each discovery.
-```
-
-> Called at the start of any session touching a known area. Surfaces accumulated team intelligence before a single line is written.
-
-<br />
-
-### `commit(fact, context)`
-
-```typescript
-// When you discover something worth preserving, write it.
-await engram.commit({
-  fact: "Auth middleware caches tokens in memory. Restart clears all sessions.",
-  context: "Discovered during load testing — 2k concurrent users caused cascade logout.",
-  scope: "src/middleware/auth.ts",
-  confidence: 0.95
-});
-```
-
-> Entries are **append-only and never deleted.** The record of what was known, and when, is permanent.
-
-<br />
-
-### `conflicts()`
-
-```typescript
-// Surface contradictions before they become bugs.
-const contradictions = await engram.conflicts();
-
-// Returns: pairs of semantically contradictory facts,
-// flagged automatically via embedding similarity scoring.
-```
-
-> Not an error that blocks you. A structured artifact you review and resolve — a signal that something in the codebase changed and the knowledge base needs reconciling.
-
-<br />
-
-## 🍀 Works With Your Existing Stack
-
-Engram is MCP-native. No changes to how you work.
-
-| Agent / IDE | Status |
-|---|---|
-| Claude Code | 🌿 Compatible |
-| Cursor | 🌿 Compatible |
-| Windsurf | 🌿 Compatible |
-| Any MCP client | 🌿 Compatible |
-
-Connect to the server. Every session starts with accumulated team intelligence instead of nothing.
-
-<br />
-
-## 🌿 Roadmap
+### Run
 
 ```
- ○  MCP server — query, commit, and conflicts tools
- ○  SQLite backend — append-only fact store
- ○  Semantic search over committed facts
- ○  Embedding-based conflict detection
- ○  Two-engineer reproducible demo
+engram serve
 ```
 
-<br />
+By default, Engram runs at `localhost:7474` and stores facts in `~/.engram/knowledge.db`.
 
-## 🍃 Current Status
+### Connect
 
-Engram is in early development. The core design is solid — the architecture, API surface, and storage model are defined. Implementation is underway.
+Add to your MCP config:
 
-If you're interested in what's being built, **star the repo** to follow along. If you want to help shape it, open an issue or start a discussion. Early feedback on the design changes real decisions.
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "url": "http://localhost:7474/mcp"
+    }
+  }
+}
+```
 
-<br />
-
-## 🌱 Contributing
-
-Engram is being built in the open.
-
-If the problem resonates with you — if you've felt the pain of agents re-discovering things that were already known — contributions are welcome. See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for how to get involved.
-
-Not sure where to start? Open a discussion and say what you're thinking. That counts.
-
-<br />
-
-## 🍀 Feedback
-
-Thoughts on the design, the API surface, or the problem itself?
-
-Open an issue or start a [GitHub Discussion](https://github.com/Agentscreator/Engram/discussions). This is early enough that real feedback changes real decisions.
+That's it. Your agent now has access to your team's accumulated knowledge.
 
 <br />
+
+## Team setup
+
+Engram is local-first by default. To share knowledge across your team, point everyone at the same server:
+
+```
+engram serve --host 0.0.0.0 --port 7474
+```
+
+Or deploy with Docker:
+
+```
+docker run -p 7474:7474 -v engram-data:/data engram/server
+```
+
+Engineers connect their agents to the same host. Every commit is immediately available to every agent on the team.
+
+<br />
+
+## What Engram is not
+
+There are 400+ MCP servers that give an individual agent persistent memory across their own sessions. Engram is not that.
+
+Engram is specifically for the consistency problem: what happens when Agent A and Agent B — running in separate sessions, for different engineers — develop incompatible beliefs about the same codebase. No existing tool detects this. Engram does.
+
+<br />
+
+## Why this matters
+
+Multi-agent workflows are becoming standard. The tooling for orchestrating agents exists. The tooling for keeping their knowledge consistent does not.
+
+A position paper presented at the Architecture 2.0 Workshop (March 2026) identified multi-agent memory consistency as the most pressing open challenge in agentic systems. Engram is a working implementation of one answer.
+
+<br />
+
+## Status
+
+Early. The core loop — commit, query, conflict detection — works. The following are not yet implemented:
+
+- [ ] Authentication and per-user scoping
+- [ ] Conflict resolution workflow (currently detection only)
+- [ ] Cross-team federation
+- [ ] Dashboard UI
+
+PRs welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+<br />
+
+## License
+
+Apache 2.0
 
 ---
 
 <div align="center">
 
-🌿 &nbsp; 🍃 &nbsp; 🌱 &nbsp; 🍀 &nbsp; 🌿
-
 <br />
 
-*A biological engram is the physical trace a memory leaves in the brain.*
-*That's the idea.*
+*An engram is the physical trace a memory leaves in the brain — the actual unit of stored knowledge.*
 
 <br />
 
