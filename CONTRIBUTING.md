@@ -105,7 +105,6 @@ The [README roadmap](./README.md#roadmap) lists what's being built. These are go
 
 Not sure where to start? Open a discussion. Describe what you're thinking, what interests you, or what problem you've run into. That's enough to start a conversation.
 
-You can also reach out directly at **joshnathbrown884@gmail.com**.
 
 <br />
 
