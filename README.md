@@ -32,14 +32,26 @@ When two agents develop incompatible beliefs about the same system, Engram detec
 
 <br />
 
-## Install
+## Quick Start
 
-```bash
-pip install engram-team
-engram install
-```
+1. Install Engram:
+   ```bash
+   pip install engram-team
+   engram install
+   ```
 
-`engram install` auto-detects your MCP client (Claude Code, Cursor, Windsurf) and adds the config. Restart your editor and open a new chat — your agent handles everything else.
+2. Restart your editor (Claude Code, Cursor, or Windsurf)
+
+3. Open a new chat and ask your agent:
+   ```
+   "Set up Engram for my team"
+   ```
+
+4. Your agent will ask if you're:
+   - **Creating a new team workspace** → You'll need a PostgreSQL database URL (get one free at [Neon](https://neon.tech), [Supabase](https://supabase.com), or [Railway](https://railway.app))
+   - **Joining an existing workspace** → You'll need the Invite Key from your team founder
+
+5. Done! Your agent now has persistent team memory.
 
 <br />
 

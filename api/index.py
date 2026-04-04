@@ -287,7 +287,10 @@ def _render_landing() -> str:
   <section>
     <div class="container">
       <div class="install-section">
-        <h2 class="section-title">Install</h2>
+        <h2 class="section-title">Quick Start</h2>
+        <p class="note" style="margin-bottom: 1rem;">
+          1. Install Engram:
+        </p>
         <div class="code-block">
           <button class="copy-btn" onclick="copyCode('install-cmd-1')">Copy</button>
           <div id="install-cmd-1">pip install engram-team</div>
@@ -296,9 +299,20 @@ def _render_landing() -> str:
           <button class="copy-btn" onclick="copyCode('install-cmd-2')">Copy</button>
           <div id="install-cmd-2">engram install</div>
         </div>
-        <p class="note">
-          <code>engram install</code> auto-detects your MCP client (Claude Code, Cursor, Windsurf) and adds the config. 
-          Restart your editor and open a new chat — your agent handles everything else.
+        <p class="note" style="margin-top: 1.5rem;">
+          2. Restart your editor (Claude Code, Cursor, or Windsurf)
+        </p>
+        <p class="note" style="margin-top: 1rem;">
+          3. Open a new chat and ask your agent:
+        </p>
+        <div class="code-block" style="margin-top: 0.75rem;">
+          <button class="copy-btn" onclick="copyCode('setup-prompt')">Copy</button>
+          <div id="setup-prompt">Set up Engram for my team</div>
+        </div>
+        <p class="note" style="margin-top: 1.5rem;">
+          Your agent will guide you through setup. You'll need either:
+          <br>• A PostgreSQL database URL (if creating a new team workspace)
+          <br>• An Invite Key (if joining an existing workspace)
         </p>
       </div>
     </div>
