@@ -18,8 +18,8 @@ def _render_landing() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Engram — Shared Memory for AI Agents</title>
-  <meta name="description" content="Give your AI agents shared, persistent memory that detects contradictions. Open source. Apache 2.0.">
+  <title>Engram — Shared memory for your team's agents</title>
+  <meta name="description" content="Shared memory for your team's agents. Zero setup. You own your data.">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     
@@ -31,7 +31,7 @@ def _render_landing() -> str:
     }
     
     .container {
-      max-width: 1200px;
+      max-width: 900px;
       margin: 0 auto;
       padding: 0 24px;
     }
@@ -57,7 +57,7 @@ def _render_landing() -> str:
     
     .nav-links {
       display: flex;
-      gap: 32px;
+      gap: 24px;
       align-items: center;
     }
     
@@ -72,194 +72,158 @@ def _render_landing() -> str:
       color: #059669;
     }
     
-    .github-btn {
-      background: #059669;
-      color: white;
-      padding: 8px 20px;
-      border-radius: 6px;
-      font-weight: 500;
-    }
-    
-    .github-btn:hover {
-      background: #047857;
-      color: white;
-    }
-    
     /* Hero */
     .hero {
-      padding: 80px 0;
+      padding: 80px 0 60px;
       text-align: center;
+    }
+    
+    .badges {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
     }
     
     .badge {
       display: inline-block;
-      background: #ecfdf5;
-      color: #059669;
-      padding: 6px 16px;
-      border-radius: 20px;
-      font-size: 14px;
+      background: #f3f4f6;
+      color: #666;
+      padding: 4px 12px;
+      border-radius: 4px;
+      font-size: 13px;
       font-weight: 500;
-      margin-bottom: 24px;
     }
     
+    .badge.green { background: #ecfdf5; color: #059669; }
+    .badge.blue { background: #eff6ff; color: #2563eb; }
+    .badge.purple { background: #f5f3ff; color: #7c3aed; }
+    
     h1 {
-      font-size: 56px;
+      font-size: 42px;
       font-weight: 700;
-      line-height: 1.1;
-      margin-bottom: 24px;
+      line-height: 1.2;
+      margin-bottom: 20px;
       color: #1a1a1a;
     }
     
     .subtitle {
-      font-size: 20px;
+      font-size: 18px;
       color: #666;
-      max-width: 600px;
-      margin: 0 auto 40px;
-    }
-    
-    /* Install Box */
-    .install-box {
       max-width: 700px;
       margin: 0 auto 16px;
+      line-height: 1.7;
+    }
+    
+    .quote {
+      font-style: italic;
+      color: #666;
+      max-width: 700px;
+      margin: 24px auto 0;
+      padding: 16px 24px;
+      border-left: 3px solid #059669;
       background: #f9fafb;
-      border: 1px solid #e5e5e5;
-      border-radius: 12px;
-      padding: 24px;
+      text-align: left;
     }
     
-    .command-line {
-      display: flex;
-      align-items: center;
-      gap: 12px;
+    /* Install */
+    .install {
+      padding: 60px 0;
+      background: #f9fafb;
+    }
+    
+    .section-title {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 24px;
+    }
+    
+    .code-block {
       background: #1a1a1a;
-      padding: 16px 20px;
-      border-radius: 8px;
-      margin-bottom: 16px;
-    }
-    
-    .prompt {
-      color: #10b981;
-      font-family: 'Courier New', monospace;
-      font-size: 16px;
-    }
-    
-    .command {
-      flex: 1;
       color: #e5e5e5;
+      padding: 20px;
+      border-radius: 8px;
       font-family: 'Courier New', monospace;
-      font-size: 16px;
+      font-size: 15px;
+      margin-bottom: 16px;
+      position: relative;
     }
     
-    .copy-btn {
+    .code-block .copy-btn {
+      position: absolute;
+      top: 12px;
+      right: 12px;
       background: #374151;
       color: #e5e5e5;
       border: none;
       padding: 6px 12px;
       border-radius: 4px;
       cursor: pointer;
-      font-size: 13px;
-      transition: background 0.2s;
+      font-size: 12px;
     }
     
-    .copy-btn:hover {
+    .code-block .copy-btn:hover {
       background: #4b5563;
     }
     
-    .requirements {
+    .note {
       font-size: 14px;
       color: #666;
-      text-align: center;
-    }
-    
-    /* Features */
-    .features {
-      padding: 80px 0;
-      background: #f9fafb;
-    }
-    
-    .section-title {
-      text-align: center;
-      font-size: 36px;
-      font-weight: 700;
-      margin-bottom: 48px;
-    }
-    
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 32px;
-    }
-    
-    .feature-card {
-      background: white;
-      padding: 32px;
-      border-radius: 12px;
-      border: 1px solid #e5e5e5;
-    }
-    
-    .feature-icon {
-      width: 48px;
-      height: 48px;
-      background: #ecfdf5;
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 16px;
-      font-size: 24px;
-    }
-    
-    .feature-card h3 {
-      font-size: 20px;
-      margin-bottom: 12px;
-      color: #1a1a1a;
-    }
-    
-    .feature-card p {
-      color: #666;
-      font-size: 15px;
       line-height: 1.6;
     }
     
-    /* Steps */
-    .steps {
-      padding: 80px 0;
+    /* Content sections */
+    .section {
+      padding: 60px 0;
     }
     
-    .steps-list {
-      max-width: 800px;
-      margin: 0 auto;
-    }
-    
-    .step {
-      display: flex;
-      gap: 24px;
-      margin-bottom: 48px;
-    }
-    
-    .step-number {
-      flex-shrink: 0;
-      width: 48px;
-      height: 48px;
-      background: #059669;
-      color: white;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-      font-weight: 700;
-    }
-    
-    .step-content h3 {
-      font-size: 24px;
-      margin-bottom: 12px;
-    }
-    
-    .step-content p {
-      color: #666;
+    .section p {
       font-size: 16px;
-      line-height: 1.6;
+      color: #4b5563;
+      line-height: 1.8;
+      margin-bottom: 16px;
+    }
+    
+    .section ul {
+      margin: 16px 0 16px 24px;
+    }
+    
+    .section li {
+      font-size: 16px;
+      color: #4b5563;
+      line-height: 1.8;
+      margin-bottom: 8px;
+    }
+    
+    /* Tools table */
+    .tools-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 24px 0;
+    }
+    
+    .tools-table th {
+      text-align: left;
+      padding: 12px;
+      background: #f9fafb;
+      border-bottom: 2px solid #e5e5e5;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    
+    .tools-table td {
+      padding: 12px;
+      border-bottom: 1px solid #e5e5e5;
+      font-size: 15px;
+    }
+    
+    .tools-table code {
+      background: #f3f4f6;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
     }
     
     /* Footer */
@@ -279,7 +243,7 @@ def _render_landing() -> str:
     
     .footer-links {
       display: flex;
-      gap: 32px;
+      gap: 24px;
     }
     
     .footer-links a {
@@ -292,15 +256,19 @@ def _render_landing() -> str:
       color: #059669;
     }
     
+    .footer-tagline {
+      font-size: 13px;
+      color: #999;
+      font-style: italic;
+    }
+    
     /* Responsive */
     @media (max-width: 768px) {
-      h1 { font-size: 36px; }
-      .subtitle { font-size: 18px; }
-      .nav-links { gap: 16px; }
-      .hero { padding: 48px 0; }
-      .features, .steps { padding: 48px 0; }
-      .section-title { font-size: 28px; }
-      .step { flex-direction: column; }
+      h1 { font-size: 32px; }
+      .subtitle { font-size: 16px; }
+      .hero { padding: 48px 0 32px; }
+      .section { padding: 40px 0; }
+      .install { padding: 40px 0; }
       .footer-content { flex-direction: column; text-align: center; }
     }
   </style>
@@ -312,7 +280,8 @@ def _render_landing() -> str:
       <div class="header-content">
         <a href="/" class="logo">engram</a>
         <nav class="nav-links">
-          <a href="https://github.com/Agentscreator/Engram" target="_blank" class="github-btn">GitHub ↗</a>
+          <a href="https://github.com/Agentscreator/Engram" target="_blank">GitHub</a>
+          <a href="https://github.com/Agentscreator/Engram/blob/main/CONTRIBUTING.md" target="_blank">Contributing</a>
         </nav>
       </div>
     </div>
@@ -321,70 +290,146 @@ def _render_landing() -> str:
   <!-- Hero -->
   <section class="hero">
     <div class="container">
-      <div class="badge">Open source · Apache 2.0</div>
-      <h1>Shared memory for<br>your AI agents</h1>
-      <p class="subtitle">One knowledge base for your whole team. Your agent handles setup. You own your data.</p>
+      <div class="badges">
+        <span class="badge green">Status: All phases complete</span>
+        <span class="badge blue">License: Apache 2.0</span>
+        <span class="badge purple">MCP Compatible</span>
+        <span class="badge">Python 3.11+</span>
+      </div>
       
-      <div class="install-box">
-        <div class="command-line">
-          <span class="prompt">$</span>
-          <span class="command" id="cmd">pip install engram-mcp && engram install</span>
-          <button class="copy-btn" onclick="copyCommand()">Copy</button>
-        </div>
-        <p class="requirements">Auto-detects Claude Code, Cursor, and Windsurf. Writes the MCP config for you.</p>
+      <h1>Shared memory for your team's agents.<br>Zero setup. You own your data.</h1>
+      
+      <p class="subtitle">
+        Engram gives your team's agents a shared, persistent memory that survives across sessions 
+        and detects when two agents develop contradictory beliefs about the same codebase.
+      </p>
+      
+      <p class="subtitle">You bring your own database. Engram never owns your data.</p>
+      
+      <div class="quote">
+        Individual agent memory is solved. Engram solves what happens when multiple agents need to agree on what's true.
       </div>
     </div>
   </section>
 
-  <!-- Features -->
-  <section class="features">
+  <!-- How it works -->
+  <section class="section">
     <div class="container">
-      <h2 class="section-title">Why Engram?</h2>
-      <div class="features-grid">
-        <div class="feature-card">
-          <div class="feature-icon">🧠</div>
-          <h3>Shared Memory</h3>
-          <p>All your agents access the same knowledge base. No more repeating context.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">⚡</div>
-          <h3>Conflict Detection</h3>
-          <p>Automatically detects contradictions between facts. Review and resolve in the dashboard.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🔒</div>
-          <h3>You Own Your Data</h3>
-          <p>Self-hosted. Your data stays on your infrastructure. No third-party APIs.</p>
-        </div>
-        <div class="feature-card">
-          <div class="feature-icon">🚀</div>
-          <h3>Zero Config</h3>
-          <p>One command to install. Works with Claude Code, Cursor, Windsurf, and any MCP client.</p>
-        </div>
-      </div>
+      <h2 class="section-title">How it works</h2>
+      <p>
+        Every agent on your team connects to the same knowledge base. When one agent discovers something — 
+        a hidden side effect, a failed approach, an undocumented constraint — it commits that fact. 
+        Every other agent on the team can query it instantly.
+      </p>
+      <p>
+        When two agents develop incompatible beliefs about the same system, Engram detects the contradiction 
+        and surfaces it for review. No silent divergence.
+      </p>
     </div>
   </section>
 
-  <!-- Steps -->
-  <section class="steps">
+  <!-- Install -->
+  <section class="install">
     <div class="container">
-      <h2 class="section-title">Get Started</h2>
-      <div class="steps-list">
-        <div class="step">
-          <div class="step-number">1</div>
-          <div class="step-content">
-            <h3>Install & configure</h3>
-            <p>Run <code>pip install engram-mcp && engram install</code> to set up Engram and configure your MCP client automatically.</p>
-          </div>
-        </div>
-        <div class="step">
-          <div class="step-number">2</div>
-          <div class="step-content">
-            <h3>Restart your editor & open a new chat</h3>
-            <p>Your agent takes it from here — it will ask whether you're setting up a new workspace or joining one. For new workspaces, you'll need a free PostgreSQL database (neon.tech, supabase.com, or railway.app). Teammates just need the Invite Key you share with them — nothing else.</p>
-          </div>
-        </div>
+      <h2 class="section-title">Install</h2>
+      <div class="code-block">
+        <button class="copy-btn" onclick="copyCode('install-cmd')">Copy</button>
+        <div id="install-cmd">pip install engram-mcp<br>engram install</div>
       </div>
+      <p class="note">
+        <code>engram install</code> auto-detects your MCP client (Claude Code, Cursor, Windsurf) and adds the config. 
+        Restart your editor and open a new chat — your agent handles everything else.
+      </p>
+    </div>
+  </section>
+
+  <!-- What happens after install -->
+  <section class="section">
+    <div class="container">
+      <h2 class="section-title">What happens after install</h2>
+      <p>
+        Your agent calls <code>engram_status()</code> on its first tool use and walks you through setup. 
+        No docs to read. No JSON to edit.
+      </p>
+      <p><strong>Setting up a new workspace (team founder):</strong></p>
+      <p>
+        The agent asks if you're joining or creating. You say "new". It asks for a database connection string 
+        (you can get a free PostgreSQL database at neon.tech, supabase.com, or railway.app). 
+        Once set, it generates an Invite Key — that's all teammates need.
+      </p>
+      <p><strong>Joining a workspace (teammate):</strong></p>
+      <p>
+        The agent asks for your Invite Key. You paste it. Done. The workspace ID and database connection 
+        are encrypted inside it and extracted automatically.
+      </p>
+      <p>
+        <strong>Every session after that:</strong> the agent connects silently, queries before every task, 
+        commits after every discovery. Engram is invisible infrastructure.
+      </p>
+    </div>
+  </section>
+
+  <!-- You own your data -->
+  <section class="section" style="background: #f9fafb;">
+    <div class="container">
+      <h2 class="section-title">You own your data</h2>
+      <p>
+        Engram connects to a PostgreSQL database you provide. Your facts, conflicts, and agent history 
+        live in your database — not ours.
+      </p>
+      <ul>
+        <li>Use Neon, Supabase, Railway, or any PostgreSQL instance</li>
+        <li>Self-host if you want zero third-party involvement</li>
+        <li>The database URL is never stored by Engram — only in <code>~/.engram/workspace.json</code> on your machine (mode 600)</li>
+        <li>The invite key carries the database URL encrypted inside it — teammates never see it in plaintext</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Tools -->
+  <section class="section">
+    <div class="container">
+      <h2 class="section-title">Tools</h2>
+      <p>Engram exposes seven MCP tools. The first three handle setup; the last four are the knowledge layer.</p>
+      
+      <table class="tools-table">
+        <thead>
+          <tr>
+            <th>Tool</th>
+            <th>Purpose</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>engram_status</code></td>
+            <td>Check setup state. Returns next_prompt — the agent says it to you.</td>
+          </tr>
+          <tr>
+            <td><code>engram_init</code></td>
+            <td>Create a new workspace (founder). Generates Team ID + Invite Key.</td>
+          </tr>
+          <tr>
+            <td><code>engram_join</code></td>
+            <td>Join a workspace with just an Invite Key. Extracts workspace ID + db URL automatically.</td>
+          </tr>
+          <tr>
+            <td><code>engram_query</code></td>
+            <td>Pull what your team's agents collectively know about a topic.</td>
+          </tr>
+          <tr>
+            <td><code>engram_commit</code></td>
+            <td>Persist a verified discovery — fact, constraint, decision, failed approach.</td>
+          </tr>
+          <tr>
+            <td><code>engram_conflicts</code></td>
+            <td>Surface pairs of facts that semantically contradict each other.</td>
+          </tr>
+          <tr>
+            <td><code>engram_resolve</code></td>
+            <td>Settle a disagreement: pick a winner, merge both sides, or dismiss.</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </section>
 
@@ -396,16 +441,18 @@ def _render_landing() -> str:
           <span style="font-weight: 600; color: #1a1a1a;">engram</span>
           <a href="https://github.com/Agentscreator/Engram" target="_blank">GitHub</a>
           <a href="https://github.com/Agentscreator/Engram/blob/main/LICENSE" target="_blank">Apache 2.0</a>
+          <a href="https://github.com/Agentscreator/Engram/blob/main/CONTRIBUTING.md" target="_blank">Contributing</a>
         </div>
-        <p style="color: #999; font-size: 14px;">Python 3.11+ · Works with Claude Code, Cursor, Windsurf · <a href="https://github.com/Agentscreator/Engram" target="_blank" style="color: #059669;">Read the docs ↗</a></p>
       </div>
+      <p class="footer-tagline">An engram is the physical trace a memory leaves in the brain — the actual unit of stored knowledge.</p>
     </div>
   </footer>
 
   <script>
-    function copyCommand() {
-      const cmd = document.getElementById('cmd').textContent;
-      navigator.clipboard.writeText(cmd).then(() => {
+    function copyCode(id) {
+      const el = document.getElementById(id);
+      const text = el.textContent.replace(/\n/g, ' && ').trim();
+      navigator.clipboard.writeText(text).then(() => {
         const btn = event.target;
         btn.textContent = 'Copied!';
         setTimeout(() => btn.textContent = 'Copy', 2000);
