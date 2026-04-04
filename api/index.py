@@ -290,7 +290,8 @@ def _render_landing() -> str:
         <h2 class="section-title">Install</h2>
         <div class="code-block">
           <button class="copy-btn" onclick="copyCode('install-cmd')">Copy</button>
-          <div id="install-cmd">pip install engram-team<br>engram install</div>
+          <div id="install-cmd">pip install engram-team
+engram install</div>
         </div>
         <p class="note">
           <code>engram install</code> auto-detects your MCP client (Claude Code, Cursor, Windsurf) and adds the config. 
