@@ -206,7 +206,9 @@ def _render_landing() -> str:
       font-family: 'JetBrains Mono', 'SF Mono', monospace;
       font-size: 14px; color: var(--emerald-300);
       position: relative; overflow-x: auto;
+      transition: border-color 0.3s, box-shadow 0.3s;
     }
+    /* ── Copy button animation ───────────────────────────────── */
     .copy-btn {
       position: absolute; top: 10px; right: 10px;
       background: rgba(52, 211, 153, 0.1);
@@ -215,9 +217,16 @@ def _render_landing() -> str:
       border-radius: 6px; cursor: pointer;
       font-size: 11px; font-weight: 600; font-family: 'Inter', sans-serif;
       letter-spacing: 0.03em;
-      transition: background 0.2s, border-color 0.2s;
+      transition: background 0.2s, border-color 0.2s, color 0.2s, box-shadow 0.3s, transform 0.15s;
     }
     .copy-btn:hover { background: rgba(52, 211, 153, 0.2); border-color: rgba(52, 211, 153, 0.35); }
+    .copy-btn.copied {
+      background: rgba(52, 211, 153, 0.25);
+      border-color: var(--emerald-400);
+      color: var(--emerald-300);
+      box-shadow: 0 0 16px rgba(52, 211, 153, 0.2);
+      transform: scale(1.05);
+    }
 
     /* ── Platform tabs ───────────────────────────────────────── */
     .platform-tabs { display: flex; gap: 2px; margin-bottom: 2px; }
@@ -322,6 +331,7 @@ def _render_landing() -> str:
       font-size: 14px; font-weight: 600; cursor: pointer;
       white-space: nowrap; transition: transform 0.2s, box-shadow 0.3s;
       box-shadow: 0 2px 16px rgba(5, 150, 105, 0.25);
+      display: inline-flex; align-items: center;
     }
     .search-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 24px rgba(5, 150, 105, 0.35); }
     .search-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
@@ -364,6 +374,47 @@ def _render_landing() -> str:
     }
     .graph-search-input:focus { outline: none; border-color: var(--emerald-500); }
     .graph-search-input::placeholder { color: var(--text-muted); }
+
+    /* ── Graph hero section ──────────────────────────────────── */
+    .graph-hero {
+      position: relative; z-index: 1;
+      padding: 80px 0;
+      margin: 40px 0;
+      background: linear-gradient(180deg, rgba(52, 211, 153, 0.03) 0%, transparent 100%);
+      border-top: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .graph-hero-header { text-align: center; margin-bottom: 48px; }
+    .graph-hero-title {
+      font-size: 40px; font-weight: 800; letter-spacing: -0.03em;
+      background: linear-gradient(135deg, var(--emerald-100) 0%, var(--emerald-400) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text; margin-bottom: 16px;
+    }
+    .graph-hero-desc {
+      font-size: 17px; color: var(--text-secondary);
+      max-width: 520px; margin: 0 auto; line-height: 1.7;
+    }
+    .graph-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(16px);
+      border-radius: 20px;
+      padding: 40px;
+      border: 1px solid var(--border-glow);
+      box-shadow: 0 0 80px rgba(52, 211, 153, 0.04), 0 4px 32px rgba(0,0,0,0.2);
+    }
+
+    /* ── Loading spinner ─────────────────────────────────────── */
+    .loading-spinner {
+      width: 20px; height: 20px;
+      border: 2px solid var(--border-subtle);
+      border-top-color: var(--emerald-400);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      display: inline-block; vertical-align: middle;
+      margin-right: 10px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* ── Scroll animations ───────────────────────────────────── */
     .reveal {
@@ -413,6 +464,9 @@ def _render_landing() -> str:
       #cy { height: 380px; }
       .platform-tabs { flex-wrap: wrap; }
       .install-step { flex-direction: column; gap: 12px; }
+      .graph-hero { padding: 48px 0; }
+      .graph-hero-title { font-size: 28px; }
+      .graph-card { padding: 24px; }
     }
   </style>
 </head>
@@ -429,6 +483,7 @@ def _render_landing() -> str:
       <a href="/" class="logo"><span class="logo-dot"></span>engram</a>
       <nav class="nav-links">
         <a href="#install">Install</a>
+        <a href="#dashboard">Dashboard</a>
         <a href="#privacy">Privacy</a>
         <a href="https://github.com/Agentscreator/Engram" target="_blank">GitHub</a>
       </nav>
@@ -532,42 +587,59 @@ def _render_landing() -> str:
     </p>
   </div>
 
-  <!-- Memory graph -->
-  <div class="card reveal">
-    <div class="section-label">Dashboard</div>
-    <div class="section-title">View your memory graph</div>
-    <div class="section-desc">Search your workspace to see what your agents know — facts, conflicts, and lineage chains.</div>
-
-    <div class="search-form">
-      <div class="search-row">
-        <input class="search-input" id="engram-id-input" placeholder="Workspace ID  (ENG-XXXX-XXXX)" autocomplete="off" spellcheck="false" />
-      </div>
-      <div class="search-row">
-        <input class="search-input" id="invite-key-input" placeholder="Invite key  (ek_live_...)" autocomplete="off" spellcheck="false" type="password" />
-        <button class="search-btn" id="search-btn" onclick="loadGraph()">View Graph</button>
-      </div>
+  <!-- Memory graph — full-width breakout -->
+</div>
+<section class="graph-hero reveal" id="dashboard">
+  <div class="container">
+    <div class="graph-hero-header">
+      <div class="section-label">Dashboard</div>
+      <h2 class="graph-hero-title">View your memory graph</h2>
+      <p class="graph-hero-desc">
+        See everything your agents know — facts, conflicts, and lineage chains.
+        Enter your workspace credentials to explore your team's shared memory in real time.
+      </p>
     </div>
-    <div id="graph-error"></div>
-    <div id="graph-loading">Loading your memory graph…</div>
 
-    <div id="graph-section">
-      <div class="graph-stats" id="graph-stats"></div>
-      <div class="graph-legend" id="graph-legend">
-        <span class="legend-item"><span class="legend-dot" style="background:var(--emerald-500)"></span>Active fact</span>
-        <span class="legend-item"><span class="legend-dot" style="background:#64748b"></span>Retired fact</span>
-        <span class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>Conflict</span>
+    <div class="graph-card">
+      <div class="search-form">
+        <div class="search-row">
+          <input class="search-input" id="engram-id-input" placeholder="Workspace ID  (ENG-XXXX-XXXX)" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="search-row">
+          <input class="search-input" id="invite-key-input" placeholder="Invite key  (ek_live_...)" autocomplete="off" spellcheck="false" type="password" />
+          <button class="search-btn" id="search-btn" onclick="loadGraph()">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="margin-right:6px;"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5"/><path d="M11 11l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            View Graph
+          </button>
+        </div>
       </div>
-      <div class="graph-search-row">
-        <input class="graph-search-input" id="fact-search" placeholder="Filter facts…" oninput="filterGraph(this.value)" />
+      <div id="graph-error"></div>
+      <div id="graph-loading">
+        <div class="loading-spinner"></div>
+        Loading your memory graph…
       </div>
-      <div id="cy" style="margin-top:12px;"></div>
-      <div class="fact-detail" id="fact-detail">
-        <h4 id="detail-scope"></h4>
-        <p id="detail-content"></p>
-        <div class="fact-meta" id="detail-meta"></div>
+
+      <div id="graph-section">
+        <div class="graph-stats" id="graph-stats"></div>
+        <div class="graph-legend" id="graph-legend">
+          <span class="legend-item"><span class="legend-dot" style="background:var(--emerald-500)"></span>Active fact</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#64748b"></span>Retired fact</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>Conflict</span>
+        </div>
+        <div class="graph-search-row">
+          <input class="graph-search-input" id="fact-search" placeholder="Filter facts…" oninput="filterGraph(this.value)" />
+        </div>
+        <div id="cy" style="margin-top:12px;"></div>
+        <div class="fact-detail" id="fact-detail">
+          <h4 id="detail-scope"></h4>
+          <p id="detail-content"></p>
+          <div class="fact-meta" id="detail-meta"></div>
+        </div>
       </div>
     </div>
   </div>
+</section>
+<div class="container">
 
   <!-- Privacy -->
   <div class="card reveal" id="privacy">
@@ -749,12 +821,21 @@ function copyCode(id) {
   const text = document.getElementById(id).textContent.trim();
   navigator.clipboard.writeText(text).then(() => {
     const btn = event.target;
+    const original = btn.textContent;
     btn.textContent = '✓ Copied';
-    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = original; btn.classList.remove('copied'); }, 2000);
     const toast = document.getElementById('copy-toast');
     clearTimeout(toastTimeout);
     toast.classList.add('show');
-    toastTimeout = setTimeout(() => toast.classList.remove('show'), 2200);
+    toastTimeout = setTimeout(() => toast.classList.remove('show'), 2500);
+    // Flash the parent code block border
+    const block = document.getElementById(id).closest('.code-block');
+    if (block) {
+      block.style.borderColor = 'rgba(52, 211, 153, 0.5)';
+      block.style.boxShadow = '0 0 20px rgba(52, 211, 153, 0.1)';
+      setTimeout(() => { block.style.borderColor = ''; block.style.boxShadow = ''; }, 800);
+    }
   });
 }
 
