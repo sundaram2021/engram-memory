@@ -16,6 +16,9 @@
     },
     "api/install.py": {
       "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
+    },
+    "api/dashboard_page.py": {
+      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
     }
   },
   "rewrites": [
@@ -26,6 +29,7 @@
     { "source": "/install", "destination": "/api/install" },
     { "source": "/install.ps1", "destination": "/api/install" },
     { "source": "/install.cmd", "destination": "/api/install" },
+    { "source": "/dashboard", "destination": "/api/dashboard_page" },
     { "source": "/(.*)", "destination": "/api/index" }
   ]
 }

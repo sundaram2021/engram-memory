@@ -19,7 +19,6 @@ def _render_landing() -> str:
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"></script>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -483,7 +482,7 @@ def _render_landing() -> str:
       <a href="/" class="logo"><span class="logo-dot"></span>engram</a>
       <nav class="nav-links">
         <a href="#install">Install</a>
-        <a href="#dashboard">Dashboard</a>
+        <a href="/dashboard">Dashboard</a>
         <a href="#privacy">Privacy</a>
         <a href="https://github.com/Agentscreator/Engram" target="_blank">GitHub</a>
       </nav>
@@ -561,56 +560,19 @@ def _render_landing() -> str:
     </p>
   </div>
 
-  <!-- Memory graph — full-width breakout -->
+  <!-- Dashboard CTA -->
 </div>
 <section class="graph-hero reveal" id="dashboard">
-  <div class="container">
-    <div class="graph-hero-header">
-      <div class="section-label">Dashboard</div>
-      <h2 class="graph-hero-title">View your memory graph</h2>
-      <p class="graph-hero-desc">
-        See everything your agents know — facts, conflicts, and lineage chains.
-        Enter your workspace credentials to explore your team's shared memory in real time.
-      </p>
-    </div>
-
-    <div class="graph-card">
-      <div class="search-form">
-        <div class="search-row">
-          <input class="search-input" id="engram-id-input" placeholder="Workspace ID  (ENG-XXXX-XXXX)" autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="search-row">
-          <input class="search-input" id="invite-key-input" placeholder="Invite key  (ek_live_...)" autocomplete="off" spellcheck="false" type="password" />
-          <button class="search-btn" id="search-btn" onclick="loadGraph()">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="margin-right:6px;"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5"/><path d="M11 11l3 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-            View Graph
-          </button>
-        </div>
-      </div>
-      <div id="graph-error"></div>
-      <div id="graph-loading">
-        <div class="loading-spinner"></div>
-        Loading your memory graph…
-      </div>
-
-      <div id="graph-section">
-        <div class="graph-stats" id="graph-stats"></div>
-        <div class="graph-legend" id="graph-legend">
-          <span class="legend-item"><span class="legend-dot" style="background:var(--emerald-500)"></span>Active fact</span>
-          <span class="legend-item"><span class="legend-dot" style="background:#64748b"></span>Retired fact</span>
-          <span class="legend-item"><span class="legend-dot" style="background:#f59e0b"></span>Conflict</span>
-        </div>
-        <div class="graph-search-row">
-          <input class="graph-search-input" id="fact-search" placeholder="Filter facts…" oninput="filterGraph(this.value)" />
-        </div>
-        <div id="cy" style="margin-top:12px;"></div>
-        <div class="fact-detail" id="fact-detail">
-          <h4 id="detail-scope"></h4>
-          <p id="detail-content"></p>
-          <div class="fact-meta" id="detail-meta"></div>
-        </div>
-      </div>
-    </div>
+  <div class="container" style="text-align:center;">
+    <div class="section-label">Dashboard</div>
+    <h2 class="graph-hero-title">View your memory graph</h2>
+    <p class="graph-hero-desc">
+      See everything your agents know. Browse facts, resolve conflicts, track agents, and explore lineage chains — all in one place.
+    </p>
+    <a href="/dashboard" class="hero-cta" style="margin-top:32px;">
+      Open Dashboard
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8h10m0 0L9 4m4 4L9 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
   </div>
 </section>
 <div class="container">
@@ -784,157 +746,6 @@ function copyCode(id) {
   });
 }
 
-// ── Graph state ────────────────────────────────────────────────────
-let cy = null;
-let allElements = null;
-
-async function loadGraph() {
-  const engramId  = document.getElementById('engram-id-input').value.trim();
-  const inviteKey = document.getElementById('invite-key-input').value.trim();
-  const errEl  = document.getElementById('graph-error');
-  const loadEl = document.getElementById('graph-loading');
-  const secEl  = document.getElementById('graph-section');
-  const btn    = document.getElementById('search-btn');
-
-  errEl.style.display  = 'none';
-  secEl.style.display  = 'none';
-  loadEl.style.display = 'block';
-  btn.disabled = true;
-
-  try {
-    const resp = await fetch('/workspace/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ engram_id: engramId, invite_key: inviteKey }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      errEl.textContent = data.error || 'Authentication failed. Check your workspace ID and invite key.';
-      errEl.style.display = 'block';
-      return;
-    }
-    renderGraph(data);
-    secEl.style.display = 'block';
-  } catch (e) {
-    errEl.textContent = 'Connection error. Please try again.';
-    errEl.style.display = 'block';
-  } finally {
-    loadEl.style.display = 'none';
-    btn.disabled = false;
-  }
-}
-
-function renderGraph(data) {
-  const { facts, conflicts, agents } = data;
-  const active = facts.filter(f => !f.valid_until).length;
-  const retired = facts.filter(f => f.valid_until).length;
-  const open = conflicts.filter(c => c.status === 'open').length;
-  document.getElementById('graph-stats').innerHTML = `
-    <div class="stat"><div class="stat-num">${active}</div><div class="stat-label">Active facts</div></div>
-    <div class="stat"><div class="stat-num">${retired}</div><div class="stat-label">Retired</div></div>
-    <div class="stat"><div class="stat-num">${open}</div><div class="stat-label">Conflicts</div></div>
-    <div class="stat"><div class="stat-num">${(agents||[]).length}</div><div class="stat-label">Agents</div></div>
-  `;
-
-  const elements = [];
-  const scopeColors = {};
-  const PALETTE = ['#10b981','#06b6d4','#8b5cf6','#ec4899','#f59e0b','#22c55e','#3b82f6'];
-  let palIdx = 0;
-  const scopeColor = (scope) => {
-    if (!scopeColors[scope]) scopeColors[scope] = PALETTE[palIdx++ % PALETTE.length];
-    return scopeColors[scope];
-  };
-
-  facts.forEach(f => {
-    const ret = !!f.valid_until;
-    elements.push({ data: {
-      id: f.id, label: f.scope || 'general',
-      content: f.content, scope: f.scope,
-      fact_type: f.fact_type, committed_at: f.committed_at,
-      durability: f.durability, retired: ret,
-      color: ret ? '#64748b' : scopeColor(f.scope || 'general'),
-      size: ret ? 18 : (f.confidence || 0.9) * 36 + 12,
-    }});
-  });
-
-  facts.filter(f => f.supersedes_fact_id).forEach(f => {
-    elements.push({ data: {
-      id: `lin-${f.id}`, source: f.supersedes_fact_id, target: f.id,
-      kind: 'lineage', label: 'supersedes',
-    }});
-  });
-
-  conflicts.forEach(c => {
-    if (c.status === 'open') {
-      elements.push({ data: {
-        id: `con-${c.id}`, source: c.fact_a_id, target: c.fact_b_id,
-        kind: 'conflict', label: 'conflict',
-        explanation: c.explanation, severity: c.severity,
-      }});
-    }
-  });
-
-  allElements = elements;
-  if (cy) cy.destroy();
-  cy = cytoscape({
-    container: document.getElementById('cy'),
-    elements,
-    style: [
-      { selector: 'node', style: {
-        'background-color': 'data(color)', 'label': 'data(label)',
-        'font-size': '10px', 'color': '#94a3b8',
-        'text-valign': 'bottom', 'text-margin-y': '5px',
-        'width': 'data(size)', 'height': 'data(size)',
-        'border-width': 1.5, 'border-color': 'rgba(255,255,255,0.1)',
-      }},
-      { selector: 'node[retired = true]', style: { 'opacity': 0.35, 'border-style': 'dashed' }},
-      { selector: 'edge[kind = "lineage"]', style: {
-        'line-color': '#10b981', 'target-arrow-color': '#10b981',
-        'target-arrow-shape': 'triangle', 'curve-style': 'bezier',
-        'width': 1, 'opacity': 0.4,
-      }},
-      { selector: 'edge[kind = "conflict"]', style: {
-        'line-color': '#ef4444', 'line-style': 'dashed',
-        'width': 2, 'opacity': 0.7, 'curve-style': 'bezier',
-        'label': '×', 'font-size': '12px', 'text-rotation': 'autorotate',
-      }},
-      { selector: ':selected', style: { 'border-color': '#34d399', 'border-width': 2.5 }},
-    ],
-    layout: {
-      name: facts.length < 30 ? 'cose' : 'random',
-      animate: facts.length < 80, randomize: false,
-      nodeRepulsion: 8000, idealEdgeLength: 120, padding: 24,
-    },
-  });
-
-  cy.on('tap', 'node', evt => {
-    const d = evt.target.data();
-    document.getElementById('detail-scope').textContent = `${d.scope || 'general'}  ·  ${d.fact_type || 'observation'}`;
-    document.getElementById('detail-content').textContent = d.content || '';
-    const ts = d.committed_at ? new Date(d.committed_at).toLocaleString() : '';
-    document.getElementById('detail-meta').textContent = `${d.retired ? 'Retired' : 'Active'}  ·  ${d.durability || 'durable'}  ·  ${ts}`;
-    document.getElementById('fact-detail').style.display = 'block';
-  });
-  cy.on('tap', evt => {
-    if (evt.target === cy) document.getElementById('fact-detail').style.display = 'none';
-  });
-}
-
-function filterGraph(query) {
-  if (!cy || !allElements) return;
-  const q = query.toLowerCase();
-  if (!q) { cy.elements().style('opacity', 1); return; }
-  cy.nodes().forEach(n => {
-    const matches = (n.data('content') || '').toLowerCase().includes(q) || (n.data('scope') || '').toLowerCase().includes(q);
-    n.style('opacity', matches ? 1 : 0.08);
-  });
-  cy.edges().style('opacity', 0.03);
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('invite-key-input').addEventListener('keydown', e => { if (e.key === 'Enter') loadGraph(); });
-  document.getElementById('engram-id-input').addEventListener('keydown', e => { if (e.key === 'Enter') loadGraph(); });
-});
 </script>
 </body>
 </html>"""
