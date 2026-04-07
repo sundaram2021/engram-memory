@@ -32,6 +32,56 @@ if /i "%HAS_KEY%"=="y" (
     set /p "INVITE_KEY=Paste your invite key: "
 )
 
+REM ── Write shared Python patcher ──────────────────────────────────
+set "PATCHER=%TEMP%\engram_patch.py"
+(
+echo import json, sys, os
+echo.
+echo def load^(path^):
+echo     if not os.path.exists^(path^): return {}
+echo     try:
+echo         raw = open^(path^).read^(^).strip^(^)
+echo         return json.loads^(raw^) if raw else {}
+echo     except json.JSONDecodeError: return {}
+echo.
+echo fmt, f, u, k = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+echo c = load^(f^)
+echo d = os.path.dirname^(f^)
+echo if d: os.makedirs^(d, exist_ok=True^)
+echo if fmt == 'url':
+echo     c.setdefault^('mcpServers', {}^)
+echo     e = {'url': u}
+echo     if k: e['headers'] = {'Authorization': 'Bearer ' + k}
+echo     c['mcpServers']['engram'] = e
+echo elif fmt == 'windsurf':
+echo     c.setdefault^('mcpServers', {}^)
+echo     e = {'serverUrl': u}
+echo     if k: e['headers'] = {'Authorization': 'Bearer ' + k}
+echo     c['mcpServers']['engram'] = e
+echo elif fmt == 'vscode':
+echo     c.setdefault^('servers', {}^)
+echo     e = {'type': 'http', 'url': u}
+echo     if k: e['headers'] = {'Authorization': 'Bearer ' + k}
+echo     c['servers']['engram'] = e
+echo elif fmt == 'claude-code':
+echo     c.setdefault^('mcpServers', {}^)
+echo     e = {'type': 'http', 'url': u}
+echo     if k: e['headers'] = {'Authorization': 'Bearer ' + k}
+echo     c['mcpServers']['engram'] = e
+echo elif fmt == 'claude-desktop':
+echo     c.setdefault^('mcpServers', {}^)
+echo     a = ['-y', 'mcp-remote@latest', u]
+echo     if k: a.extend^(['--header', 'Authorization: Bearer ' + k]^)
+echo     c['mcpServers']['engram'] = {'command': 'npx', 'args': a}
+echo elif fmt == 'opencode':
+echo     c.setdefault^('mcp', {}^)
+echo     e = {'type': 'remote', 'url': u, 'enabled': True}
+echo     if k: e['headers'] = {'Authorization': 'Bearer ' + k}
+echo     c['mcp']['engram'] = e
+echo json.dump^(c, open^(f, 'w'^), indent=2^)
+echo print^('  + ' + f^)
+) > "%PATCHER%"
+
 REM ── Detect and patch MCP clients ────────────────────────────────
 echo.
 echo Detecting MCP clients...
@@ -39,79 +89,68 @@ set "PATCHED=0"
 
 REM Claude Desktop — npx mcp-remote bridge
 if exist "%APPDATA%\Claude" (
-    call :patch_claude_desktop "%APPDATA%\Claude\claude_desktop_config.json"
-    set /a PATCHED+=1
+    call :patch claude-desktop "%APPDATA%\Claude\claude_desktop_config.json"
 )
 
-REM Claude Code — ~/.claude.json
-if exist "%USERPROFILE%\.claude" (
-    call :patch_claude_code "%USERPROFILE%\.claude.json"
-    set /a PATCHED+=1
-)
-if exist "%USERPROFILE%\.claude.json" if not exist "%USERPROFILE%\.claude" (
-    call :patch_claude_code "%USERPROFILE%\.claude.json"
-    set /a PATCHED+=1
+REM Claude Code — {type: "http", url} in ~/.claude.json
+set "CC_FOUND=0"
+if exist "%USERPROFILE%\.claude"      set "CC_FOUND=1"
+if exist "%USERPROFILE%\.claude.json" set "CC_FOUND=1"
+if "%CC_FOUND%"=="1" (
+    call :patch claude-code "%USERPROFILE%\.claude.json"
 )
 
 REM Cursor
 if exist "%USERPROFILE%\.cursor" (
-    call :patch_mcpservers_url "%USERPROFILE%\.cursor\mcp.json"
-    set /a PATCHED+=1
+    call :patch url "%USERPROFILE%\.cursor\mcp.json"
 )
 
-REM VS Code — {servers: {type, url}} in mcp.json
+REM VS Code — {servers: {type: "http", url}}
 if exist "%APPDATA%\Code" (
-    call :patch_vscode "%APPDATA%\Code\User\mcp.json"
-    set /a PATCHED+=1
+    call :patch vscode "%APPDATA%\Code\User\mcp.json"
 )
 
 REM Windsurf — serverUrl
 if exist "%USERPROFILE%\.codeium\windsurf" (
-    call :patch_windsurf "%USERPROFILE%\.codeium\windsurf\mcp_config.json"
-    set /a PATCHED+=1
+    call :patch windsurf "%USERPROFILE%\.codeium\windsurf\mcp_config.json"
 )
 
 REM Kiro
 if exist "%USERPROFILE%\.kiro" (
-    call :patch_mcpservers_url "%USERPROFILE%\.kiro\settings\mcp.json"
-    set /a PATCHED+=1
+    call :patch url "%USERPROFILE%\.kiro\settings\mcp.json"
 )
 
 REM Amazon Q Developer
 if exist "%USERPROFILE%\.aws\amazonq" (
-    call :patch_mcpservers_url "%USERPROFILE%\.aws\amazonq\mcp.json"
-    set /a PATCHED+=1
+    call :patch url "%USERPROFILE%\.aws\amazonq\mcp.json"
 )
 
 REM Trae (ByteDance)
 if exist "%APPDATA%\Trae" (
-    call :patch_mcpservers_url "%APPDATA%\Trae\User\mcp.json"
-    set /a PATCHED+=1
+    call :patch url "%APPDATA%\Trae\User\mcp.json"
 )
 
 REM JetBrains / Junie
 if exist "%USERPROFILE%\.junie" (
-    call :patch_mcpservers_url "%USERPROFILE%\.junie\mcp\mcp.json"
-    set /a PATCHED+=1
+    call :patch url "%USERPROFILE%\.junie\mcp\mcp.json"
 )
 
 REM Cline (VS Code extension)
 if exist "%USERPROFILE%\Documents\Cline" (
-    call :patch_mcpservers_url "%USERPROFILE%\Documents\Cline\MCP\cline_mcp_settings.json"
-    set /a PATCHED+=1
+    call :patch url "%USERPROFILE%\Documents\Cline\MCP\cline_mcp_settings.json"
 )
 
-REM Roo Code (VS Code extension)
+REM Roo Code (VS Code extension, Cline fork)
 if exist "%APPDATA%\Code\User\globalStorage\rooveterinaryinc.roo-cline" (
-    call :patch_mcpservers_url "%APPDATA%\Code\User\globalStorage\rooveterinaryinc.roo-cline\settings\cline_mcp_settings.json"
-    set /a PATCHED+=1
+    call :patch url "%APPDATA%\Code\User\globalStorage\rooveterinaryinc.roo-cline\settings\cline_mcp_settings.json"
 )
 
-REM OpenCode
+REM OpenCode — {mcp: {type: "remote", url}}
 if exist "%USERPROFILE%\.config\opencode" (
-    call :patch_opencode "%USERPROFILE%\.config\opencode\config.json"
-    set /a PATCHED+=1
+    call :patch opencode "%USERPROFILE%\.config\opencode\config.json"
 )
+
+del "%PATCHER%" >nul 2>&1
 
 REM ── Result ───────────────────────────────────────────────────────
 echo.
@@ -135,32 +174,7 @@ if %PATCHED% equ 0 (
 echo.
 goto :eof
 
-:patch_mcpservers_url
-set "CF=%~1"
-%PY% -c "import json,os;f=r'%CF%';u='%MCP_URL%';k='%INVITE_KEY%';c=json.load(open(f)) if os.path.exists(f) else {};os.makedirs(os.path.dirname(f),exist_ok=True);c.setdefault('mcpServers',{});e={'url':u};k and e.update({'headers':{'Authorization':'Bearer '+k}});c['mcpServers']['engram']=e;json.dump(c,open(f,'w'),indent=2);print('  + '+f)"
-goto :eof
-
-:patch_windsurf
-set "CF=%~1"
-%PY% -c "import json,os;f=r'%CF%';u='%MCP_URL%';k='%INVITE_KEY%';c=json.load(open(f)) if os.path.exists(f) else {};os.makedirs(os.path.dirname(f),exist_ok=True);c.setdefault('mcpServers',{});e={'serverUrl':u};k and e.update({'headers':{'Authorization':'Bearer '+k}});c['mcpServers']['engram']=e;json.dump(c,open(f,'w'),indent=2);print('  + '+f)"
-goto :eof
-
-:patch_vscode
-set "CF=%~1"
-%PY% -c "import json,os;f=r'%CF%';u='%MCP_URL%';k='%INVITE_KEY%';c=json.load(open(f)) if os.path.exists(f) else {};os.makedirs(os.path.dirname(f),exist_ok=True);c.setdefault('servers',{});e={'type':'http','url':u};k and e.update({'headers':{'Authorization':'Bearer '+k}});c['servers']['engram']=e;json.dump(c,open(f,'w'),indent=2);print('  + '+f)"
-goto :eof
-
-:patch_claude_code
-set "CF=%~1"
-%PY% -c "import json,os;f=r'%CF%';u='%MCP_URL%';k='%INVITE_KEY%';c=json.load(open(f)) if os.path.exists(f) else {};c.setdefault('mcpServers',{});e={'type':'http','url':u};k and e.update({'headers':{'Authorization':'Bearer '+k}});c['mcpServers']['engram']=e;json.dump(c,open(f,'w'),indent=2);print('  + '+f)"
-goto :eof
-
-:patch_claude_desktop
-set "CF=%~1"
-%PY% -c "import json,os;f=r'%CF%';u='%MCP_URL%';k='%INVITE_KEY%';c=json.load(open(f)) if os.path.exists(f) else {};os.makedirs(os.path.dirname(f),exist_ok=True);c.setdefault('mcpServers',{});a=['-y','mcp-remote@latest',u];k and a.extend(['--header','Authorization: Bearer '+k]);c['mcpServers']['engram']={'command':'npx','args':a};json.dump(c,open(f,'w'),indent=2);print('  + '+f)"
-goto :eof
-
-:patch_opencode
-set "CF=%~1"
-%PY% -c "import json,os;f=r'%CF%';u='%MCP_URL%';k='%INVITE_KEY%';c=json.load(open(f)) if os.path.exists(f) else {};os.makedirs(os.path.dirname(f),exist_ok=True);c.setdefault('mcp',{});e={'type':'remote','url':u,'enabled':True};k and e.update({'headers':{'Authorization':'Bearer '+k}});c['mcp']['engram']=e;json.dump(c,open(f,'w'),indent=2);print('  + '+f)"
+:patch
+%PY% "%PATCHER%" %~1 "%~2" "%MCP_URL%" "%INVITE_KEY%"
+set /a PATCHED+=1
 goto :eof

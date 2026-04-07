@@ -5,26 +5,26 @@
   "outputDirectory": ".",
   "functions": {
     "api/index.py": {
-      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
+      "excludeFiles": "{src/**,tests/**,docs/**,assets/**,.pytest_cache/**}"
     },
     "api/mcp.py": {
-      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}",
+      "excludeFiles": "{src/**,tests/**,docs/**,assets/**,.pytest_cache/**}",
       "maxDuration": 60
     },
     "api/workspace.py": {
-      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
+      "excludeFiles": "{src/**,tests/**,docs/**,assets/**,.pytest_cache/**}"
     },
     "api/install.py": {
-      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
+      "excludeFiles": "{src/**,tests/**,docs/**,assets/**,.pytest_cache/**}"
     },
     "api/dashboard_page.py": {
-      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
+      "excludeFiles": "{src/**,tests/**,docs/**,assets/**,.pytest_cache/**}"
     },
     "api/auth.py": {
-      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
+      "excludeFiles": "{src/**,tests/**,docs/**,assets/**,.pytest_cache/**}"
     },
     "api/billing.py": {
-      "excludeFiles": "{src/**,tests/**,papers/**,assets/**,.pytest_cache/**}"
+      "excludeFiles": "{src/**,tests/**,docs/**,assets/**,.pytest_cache/**}"
     }
   },
   "rewrites": [

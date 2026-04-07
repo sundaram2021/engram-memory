@@ -198,7 +198,7 @@ Engram is grounded in peer-reviewed research on multi-agent memory systems:
 - **[Hu et al. (2026)](https://arxiv.org/abs/2512.13564)** — Survey confirming shared memory as an open frontier
 - **[Alqithami (2025)](https://arxiv.org/abs/2512.12856)** — FiFA: forgetting-by-design improves agent coherence
 
-Full literature review: [`LITERATURE.md`](./LITERATURE.md)  
+Full literature review: [`docs/LITERATURE.md`](./docs/LITERATURE.md)  
 Implementation details: [`docs/IMPLEMENTATION.md`](./docs/IMPLEMENTATION.md)
 
 ---
