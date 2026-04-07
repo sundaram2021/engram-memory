@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+import numpy as np
 import pytest
 
 from engram.engine import EngramEngine
@@ -135,6 +136,83 @@ async def test_commit_with_correction(engine: EngramEngine):
     # Old fact should be superseded
     old_fact = await engine.storage.get_fact_by_id(r1["fact_id"])
     assert old_fact["valid_until"] is not None
+
+
+@pytest.mark.asyncio
+async def test_detection_finds_numeric_conflict(engine: EngramEngine):
+    await engine.commit(
+        content="The auth service rate-limits to 500 req/s per IP",
+        scope="auth",
+        confidence=0.9,
+        agent_id="agent-1",
+    )
+    await engine.commit(
+        content="The auth service rate-limits to 1000 req/s per IP",
+        scope="auth",
+        confidence=0.9,
+        agent_id="agent-2",
+    )
+
+    await engine._detection_queue.join()
+
+    conflicts = await engine.get_conflicts(scope="auth", status="open")
+    assert len(conflicts) >= 1
+    assert any(c["detection_tier"] == "tier2_numeric" for c in conflicts)
+    assert any("rate_limit" in (c["explanation"] or "") for c in conflicts)
+
+
+@pytest.mark.asyncio
+async def test_detection_finds_cross_scope_numeric_conflict(engine: EngramEngine):
+    await engine.commit(
+        content="Auth rate limit is 500 req/s",
+        scope="auth",
+        confidence=0.9,
+        agent_id="agent-1",
+    )
+    await engine.commit(
+        content="Payments rate limit is 1000 req/s",
+        scope="payments",
+        confidence=0.9,
+        agent_id="agent-2",
+    )
+
+    await engine._detection_queue.join()
+
+    conflicts = await engine.get_conflicts(status="open")
+    assert any(c["detection_tier"] == "tier2b_cross_scope" for c in conflicts)
+
+
+@pytest.mark.asyncio
+async def test_detection_finds_semantic_nli_conflict(engine: EngramEngine, monkeypatch):
+    from engram import embeddings
+
+    class FakeNLIModel:
+        def predict(self, pairs, apply_softmax=True):
+            return [[0.99, 0.01, 0.0]]
+
+    def fake_encode(text: str):
+        return np.ones(384, dtype=np.float32)
+
+    monkeypatch.setattr(embeddings, "encode", fake_encode)
+    monkeypatch.setattr(engine, "_nli_model", FakeNLIModel(), raising=False)
+
+    await engine.commit(
+        content="The auth service uses JWT tokens",
+        scope="auth",
+        confidence=0.9,
+        agent_id="agent-1",
+    )
+    await engine.commit(
+        content="The auth service does not use JWT tokens",
+        scope="auth",
+        confidence=0.9,
+        agent_id="agent-2",
+    )
+
+    await engine._detection_queue.join()
+
+    conflicts = await engine.get_conflicts(scope="auth", status="open")
+    assert any(c["detection_tier"] == "tier1_nli" for c in conflicts)
 
 
 @pytest.mark.asyncio
