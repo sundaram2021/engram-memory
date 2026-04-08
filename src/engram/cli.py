@@ -621,7 +621,44 @@ def token_create(engineer: str, agent_id: str | None, expires_hours: int) -> Non
     tok = create_token(engineer=engineer, agent_id=agent_id, expires_hours=expires_hours)
     click.echo(tok)
 
+# ── engram config ────────────────────────────────────────────────────
 
+
+@main.group()
+def config() -> None:
+    """Show and update workspace settings."""
+    pass
+
+
+@config.command("show")
+def config_show() -> None:
+    """Pretty-print the current editable workspace settings."""
+    from engram.workspace import read_workspace_settings
+
+    try:
+        settings = read_workspace_settings()
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+    click.echo(json.dumps(settings, indent=2))
+
+
+@config.command("set")
+@click.argument("key")
+@click.argument("value")
+def config_set(key: str, value: str) -> None:
+    """Update a single editable workspace setting."""
+    from engram.workspace import parse_config_value, set_workspace_setting
+
+    try:
+        parsed_value = parse_config_value(key, value)
+        set_workspace_setting(key, value)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+    click.echo(f"Updated {key}={json.dumps(parsed_value)}")
+    
+    
 # ── engram verify ────────────────────────────────────────────────────
 
 

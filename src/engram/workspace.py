@@ -30,6 +30,7 @@ class WorkspaceConfig:
     schema: str = "engram"         # PostgreSQL schema name for Engram tables
     anonymous_mode: bool = False   # strip engineer field on every INSERT
     anon_agents: bool = False      # randomize agent_id each session
+    display_name: str = ""         # optional user-facing display name
     key_generation: int = 0        # must match DB key_generation; mismatch = disconnected
     is_creator: bool = False       # True only for the agent who ran engram_init
 
@@ -46,9 +47,12 @@ def read_workspace() -> WorkspaceConfig | None:
                 data["key_generation"] = 0
             if "is_creator" not in data:
                 data["is_creator"] = False
+            if "display_name" not in data:
+                data["display_name"] = ""
             return WorkspaceConfig(**data)
         except Exception:
             return None
+
     # Fall back to ENGRAM_DB_URL env var without a workspace file
     db_url = os.environ.get("ENGRAM_DB_URL", "")
     schema = os.environ.get("ENGRAM_SCHEMA", "engram")
@@ -62,6 +66,74 @@ def write_workspace(config: WorkspaceConfig) -> None:
     WORKSPACE_PATH.parent.mkdir(parents=True, exist_ok=True)
     WORKSPACE_PATH.write_text(json.dumps(asdict(config), indent=2))
     WORKSPACE_PATH.chmod(0o600)
+
+
+EDITABLE_CONFIG_KEYS = {"anonymous_mode", "anon_agents", "display_name"}
+
+
+def workspace_settings_dict(config: WorkspaceConfig) -> dict[str, Any]:
+    """Return only the user-editable settings."""
+    return {
+        "anonymous_mode": config.anonymous_mode,
+        "anon_agents": config.anon_agents,
+        "display_name": config.display_name,
+    }
+
+
+def read_workspace_settings() -> dict[str, Any]:
+    """Return editable settings from ~/.engram/workspace.json."""
+    if not WORKSPACE_PATH.exists():
+        raise ValueError(f"No workspace config found at {WORKSPACE_PATH}")
+
+    config = read_workspace()
+    if config is None:
+        raise ValueError(f"Failed to read workspace config at {WORKSPACE_PATH}")
+
+    return workspace_settings_dict(config)
+
+
+def _parse_bool(raw_value: str) -> bool:
+    value = raw_value.strip().lower()
+
+    if value in {"true", "1", "yes", "y", "on"}:
+        return True
+    if value in {"false", "0", "no", "n", "off"}:
+        return False
+
+    raise ValueError(f"Invalid boolean value: {raw_value}")
+
+
+def parse_config_value(key: str, raw_value: str) -> Any:
+    """Validate and coerce a raw CLI value for a supported config key."""
+    if key not in EDITABLE_CONFIG_KEYS:
+        allowed = ", ".join(sorted(EDITABLE_CONFIG_KEYS))
+        raise ValueError(f"Unknown config key '{key}'. Allowed keys: {allowed}")
+
+    if key in {"anonymous_mode", "anon_agents"}:
+        return _parse_bool(raw_value)
+
+    if key == "display_name":
+        value = raw_value.strip()
+        if not value:
+            raise ValueError("display_name cannot be empty")
+        return value
+
+    raise ValueError(f"Unsupported config key: {key}")
+
+
+def set_workspace_setting(key: str, raw_value: str) -> WorkspaceConfig:
+    """Update one editable setting in ~/.engram/workspace.json and persist it."""
+    if not WORKSPACE_PATH.exists():
+        raise ValueError(f"No workspace config found at {WORKSPACE_PATH}")
+
+    config = read_workspace()
+    if config is None:
+        raise ValueError(f"Failed to read workspace config at {WORKSPACE_PATH}")
+
+    value = parse_config_value(key, raw_value)
+    setattr(config, key, value)
+    write_workspace(config)
+    return config
 
 
 def is_configured() -> bool:
