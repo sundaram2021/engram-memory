@@ -407,6 +407,15 @@ _DASH_STYLE = """
   .theme-toggle { background: #fff; border: 1px solid #c6e9c6; border-radius: 8px;
                   padding: 0.4rem 0.6rem; cursor: pointer; font-size: 1rem; }
 
+  /* Keyboard shortcuts */
+  .keyboard-hints { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1rem;
+                    padding: 0.75rem; background: #f0f9f0; border-radius: 8px;
+                    font-size: 0.8rem; color: #5a8a5a; }
+  .keyboard-hints kbd { background: #fff; border: 1px solid #c6e9c6; border-radius: 4px;
+                        padding: 0.15rem 0.4rem; font-family: 'JetBrains Mono', monospace;
+                        font-size: 0.75rem; }
+  .conflict-card.focused { outline: 3px solid #4ade80; outline-offset: 2px; }
+
   @media (max-width: 640px) {
     .stats { grid-template-columns: repeat(2, 1fr); }
     .content-cell { max-width: 180px; }
@@ -477,6 +486,41 @@ def _dash_layout(title: str, body: str, active: str = "", dark_mode: bool = Fals
       html.classList.toggle('dark');
       localStorage.setItem('engram-theme', isDark ? 'light' : 'dark');
     }}
+    // Keyboard navigation for conflict queue
+    document.addEventListener('keydown', function(e) {{
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      const path = window.location.pathname;
+      if (!path.includes('/dashboard/conflicts')) return;
+      
+      const cards = document.querySelectorAll('.conflict-card');
+      if (!cards.length) return;
+      
+      let current = document.querySelector('.conflict-card.focused');
+      let idx = current ? Array.from(cards).indexOf(current) : -1;
+      
+      if (e.key === 'j') {{
+        e.preventDefault();
+        if (current) current.classList.remove('focused');
+        idx = Math.min(idx + 1, cards.length - 1);
+        cards[idx].classList.add('focused');
+        cards[idx].scrollIntoView({{behavior: 'smooth', block: 'center'}});
+      }} else if (e.key === 'k') {{
+        e.preventDefault();
+        if (current) current.classList.remove('focused');
+        idx = Math.max(idx - 1, 0);
+        cards[idx].classList.add('focused');
+        cards[idx].scrollIntoView({{behavior: 'smooth', block: 'center'}});
+      }} else if (e.key === 'a' && current) {{
+        const btn = current.querySelector('.btn-approve');
+        if (btn) {{ e.preventDefault(); btn.click(); }}
+      }} else if (e.key === 'b' && current) {{
+        const btns = current.querySelectorAll('.btn-approve, .btn-dismiss');
+        if (btns.length > 1) {{ e.preventDefault(); btns[1].click(); }}
+      }} else if (e.key === 's' && current) {{
+        const btn = current.querySelector('.btn-dismiss');
+        if (btn) {{ e.preventDefault(); btn.click(); }}
+      }}
+    }});
   </script>
 </body>
 </html>"""
@@ -657,7 +701,13 @@ def _render_conflicts_page(conflicts: list[dict]) -> str:
       </form>
     </div>
     <div class="conflict-cards">{cards}</div>
-    <p class="count-note">{len(conflicts)} conflict(s)</p>"""
+    <p class="count-note">{len(conflicts)} conflict(s)</p>
+    <div class="keyboard-hints">
+      <span><kbd>j</kbd> <kbd>k</kbd> navigate</span>
+      <span><kbd>a</kbd> accept fact A</span>
+      <span><kbd>b</kbd> accept fact B</span>
+      <span><kbd>s</kbd> skip</span>
+    </div>"""
     return _dash_layout("Conflicts", body, active="conflicts")
 
 

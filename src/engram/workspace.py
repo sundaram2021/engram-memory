@@ -30,6 +30,9 @@ class WorkspaceConfig:
     schema: str = "engram"  # PostgreSQL schema name for Engram tables
     anonymous_mode: bool = False  # strip engineer field on every INSERT
     anon_agents: bool = False  # randomize agent_id each session
+    key_generation: int = 0  # must match DB key_generation; mismatch = disconnected
+    is_creator: bool = False  # True only for the agent who ran engram_init
+    display_name: str = ""  # human-readable name for the workspace
     display_name: str = ""  # optional user-facing display name
     key_generation: int = 0  # must match DB key_generation; mismatch = disconnected
     is_creator: bool = False  # True only for the agent who ran engram_init
