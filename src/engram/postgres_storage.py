@@ -189,6 +189,14 @@ class PostgresStorage(BaseStorage):
 
     # ── Query operations ─────────────────────────────────────────────
 
+    async def get_distinct_scopes(self) -> list[str]:
+        """Return all unique scope values for the workspace."""
+        rows = await self.pool.fetch(
+            "SELECT DISTINCT scope FROM facts WHERE workspace_id = $1 AND valid_until IS NULL",
+            self.workspace_id,
+        )
+        return [r["scope"] for r in rows]
+
     async def get_current_facts_in_scope(
         self,
         scope: str | None = None,
@@ -252,11 +260,12 @@ class PostgresStorage(BaseStorage):
         """In PostgreSQL mode rowids are actually fact IDs (strings) from fts_search."""
         if not rowids:
             return []
-        placeholders = ", ".join(f"${i+2}" for i in range(len(rowids)))
+        placeholders = ", ".join(f"${i + 2}" for i in range(len(rowids)))
         async with self.acquire() as conn:
             rows = await conn.fetch(
                 f"SELECT * FROM facts WHERE workspace_id = $1 AND id IN ({placeholders})",
-                self.workspace_id, *rowids,
+                self.workspace_id,
+                *rowids,
             )
         return [_row_to_dict(r) for r in rows]
 
@@ -273,11 +282,12 @@ class PostgresStorage(BaseStorage):
         """Batch-fetch multiple facts by ID in a single query. Returns {id: fact_row}."""
         if not ids:
             return {}
-        placeholders = ", ".join(f"${i+2}" for i in range(len(ids)))
+        placeholders = ", ".join(f"${i + 2}" for i in range(len(ids)))
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
                 f"SELECT * FROM facts WHERE workspace_id = $1 AND id IN ({placeholders})",
-                self.workspace_id, *ids,
+                self.workspace_id,
+                *ids,
             )
         return {r["id"]: _row_to_dict(r) for r in rows}
 
@@ -287,7 +297,8 @@ class PostgresStorage(BaseStorage):
             rows = await conn.fetch(
                 "SELECT fact_a_id, fact_b_id FROM conflicts "
                 "WHERE workspace_id = $1 AND (fact_a_id = $2 OR fact_b_id = $2)",
-                self.workspace_id, fact_id,
+                self.workspace_id,
+                fact_id,
             )
         result: set[str] = set()
         for r in rows:
@@ -962,8 +973,7 @@ class PostgresStorage(BaseStorage):
             total_agents = len(agent_rows)
             most_active = agent_rows[0]["agent_id"] if agent_rows else None
             trust_scores = [
-                1.0 - (r["flagged_commits"] / r["total_commits"])
-                if r["total_commits"] > 0 else 0.8
+                1.0 - (r["flagged_commits"] / r["total_commits"]) if r["total_commits"] > 0 else 0.8
                 for r in agent_rows
             ]
             avg_trust = round(sum(trust_scores) / len(trust_scores), 3) if trust_scores else None
@@ -1053,9 +1063,6 @@ class PostgresStorage(BaseStorage):
             )
         return _row_to_dict(row) if row else None
 
-    async def consume_invite_key(self, key_hash: str) -> None:
-        async with self.acquire() as conn:
-            await conn.execute(
     async def consume_invite_key(self, key_hash: str) -> dict | None:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(

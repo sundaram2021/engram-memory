@@ -48,11 +48,13 @@ def _get_secret_key() -> str:
 
 def _b64url_encode(data: bytes) -> str:
     import base64
+
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
 
 def _b64url_decode(s: str) -> bytes:
     import base64
+
     padding = 4 - len(s) % 4
     if padding != 4:
         s += "=" * padding

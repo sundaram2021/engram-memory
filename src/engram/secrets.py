@@ -19,7 +19,10 @@ _SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("Connection String", re.compile(r"(?i)(mongodb|postgres|mysql|redis|amqp)://\S+:\S+@\S+")),
     ("GitHub Token", re.compile(r"\b(ghp|gho|ghu|ghs|ghr)_[a-zA-Z0-9]{36,}\b")),
     ("Slack Token", re.compile(r"\bxox[bpors]-[a-zA-Z0-9\-]{10,}\b")),
-    ("Generic Password Assignment", re.compile(r"(?i)(password|passwd|pwd)\s*[:=]\s*['\"][^'\"]{8,}['\"]")),
+    (
+        "Generic Password Assignment",
+        re.compile(r"(?i)(password|passwd|pwd)\s*[:=]\s*['\"][^'\"]{8,}['\"]"),
+    ),
 ]
 
 

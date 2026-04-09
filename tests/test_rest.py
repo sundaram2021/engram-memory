@@ -10,10 +10,8 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from starlette.testclient import TestClient
 from starlette.applications import Starlette
-from starlette.routing import Route
 
 from engram.rest import build_rest_routes
 
@@ -21,13 +19,20 @@ from engram.rest import build_rest_routes
 # ── helpers ──────────────────────────────────────────────────────────
 
 
-def _build_client(commit_result=None, query_result=None, conflicts_result=None, resolve_result=None):
+def _build_client(
+    commit_result=None, query_result=None, conflicts_result=None, resolve_result=None
+):
     """Build a Starlette test client with mocked engine and storage."""
     engine = MagicMock()
-    engine.commit = AsyncMock(return_value=commit_result or {"fact_id": "abc", "duplicate": False, "committed_at": "2024-01-01T00:00:00+00:00"})
+    engine.commit = AsyncMock(
+        return_value=commit_result
+        or {"fact_id": "abc", "duplicate": False, "committed_at": "2024-01-01T00:00:00+00:00"}
+    )
     engine.query = AsyncMock(return_value=query_result or [])
     engine.get_conflicts = AsyncMock(return_value=conflicts_result or [])
-    engine.resolve = AsyncMock(return_value=resolve_result or {"resolved": True, "resolution_type": "winner"})
+    engine.resolve = AsyncMock(
+        return_value=resolve_result or {"resolved": True, "resolution_type": "winner"}
+    )
     engine.batch_commit = AsyncMock(return_value={})
     engine.get_stats = AsyncMock(return_value={})
     engine.record_feedback = AsyncMock(return_value={"recorded": True})
@@ -37,7 +42,9 @@ def _build_client(commit_result=None, query_result=None, conflicts_result=None, 
     engine.get_fact = AsyncMock(return_value=None)
     engine.get_lineage = AsyncMock(return_value=[])
     engine.get_expiring_facts = AsyncMock(return_value=[])
-    engine.bulk_dismiss = AsyncMock(return_value={"total": 0, "dismissed": 0, "failed": 0, "results": []})
+    engine.bulk_dismiss = AsyncMock(
+        return_value={"total": 0, "dismissed": 0, "failed": 0, "results": []}
+    )
     # Round 8: new engine methods
     engine.create_webhook = AsyncMock(return_value={"webhook_id": "wh1", "url": "https://example.com/hook", "events": ["fact.committed"], "created_at": "2024-01-01T00:00:00+00:00"})
     engine.list_webhooks = AsyncMock(return_value=[])
@@ -104,7 +111,9 @@ def test_commit_missing_confidence():
 
 def test_commit_confidence_not_a_number():
     client, _ = _build_client()
-    resp = client.post("/api/commit", json={"content": "test", "scope": "auth", "confidence": "high"})
+    resp = client.post(
+        "/api/commit", json={"content": "test", "scope": "auth", "confidence": "high"}
+    )
     assert resp.status_code == 400
     assert "confidence" in resp.json()["error"].lower()
 
@@ -125,70 +134,100 @@ def test_commit_confidence_below_range():
 
 def test_commit_invalid_fact_type():
     client, _ = _build_client()
-    resp = client.post("/api/commit", json={
-        "content": "test", "scope": "auth", "confidence": 0.9,
-        "fact_type": "guess",
-    })
+    resp = client.post(
+        "/api/commit",
+        json={
+            "content": "test",
+            "scope": "auth",
+            "confidence": 0.9,
+            "fact_type": "guess",
+        },
+    )
     assert resp.status_code == 400
     assert "fact_type" in resp.json()["error"].lower()
 
 
 def test_commit_invalid_operation():
     client, _ = _build_client()
-    resp = client.post("/api/commit", json={
-        "content": "test", "scope": "auth", "confidence": 0.9,
-        "operation": "upsert",
-    })
+    resp = client.post(
+        "/api/commit",
+        json={
+            "content": "test",
+            "scope": "auth",
+            "confidence": 0.9,
+            "operation": "upsert",
+        },
+    )
     assert resp.status_code == 400
     assert "operation" in resp.json()["error"].lower()
 
 
 def test_commit_invalid_ttl_days_negative():
     client, _ = _build_client()
-    resp = client.post("/api/commit", json={
-        "content": "test", "scope": "auth", "confidence": 0.9,
-        "ttl_days": -1,
-    })
+    resp = client.post(
+        "/api/commit",
+        json={
+            "content": "test",
+            "scope": "auth",
+            "confidence": 0.9,
+            "ttl_days": -1,
+        },
+    )
     assert resp.status_code == 400
     assert "ttl_days" in resp.json()["error"].lower()
 
 
 def test_commit_invalid_ttl_days_zero():
     client, _ = _build_client()
-    resp = client.post("/api/commit", json={
-        "content": "test", "scope": "auth", "confidence": 0.9,
-        "ttl_days": 0,
-    })
+    resp = client.post(
+        "/api/commit",
+        json={
+            "content": "test",
+            "scope": "auth",
+            "confidence": 0.9,
+            "ttl_days": 0,
+        },
+    )
     assert resp.status_code == 400
     assert "ttl_days" in resp.json()["error"].lower()
 
 
 def test_commit_invalid_ttl_days_string():
     client, _ = _build_client()
-    resp = client.post("/api/commit", json={
-        "content": "test", "scope": "auth", "confidence": 0.9,
-        "ttl_days": "forever",
-    })
+    resp = client.post(
+        "/api/commit",
+        json={
+            "content": "test",
+            "scope": "auth",
+            "confidence": 0.9,
+            "ttl_days": "forever",
+        },
+    )
     assert resp.status_code == 400
     assert "ttl_days" in resp.json()["error"].lower()
 
 
 def test_commit_invalid_json_body():
     client, _ = _build_client()
-    resp = client.post("/api/commit", content=b"not json", headers={"Content-Type": "application/json"})
+    resp = client.post(
+        "/api/commit", content=b"not json", headers={"Content-Type": "application/json"}
+    )
     assert resp.status_code == 400
 
 
 def test_commit_valid_passes_through():
     client, engine = _build_client()
-    resp = client.post("/api/commit", json={
-        "content": "Redis runs on port 6379",
-        "scope": "infra",
-        "confidence": 0.95,
-        "fact_type": "observation",
-        "operation": "add",
-        "ttl_days": 7,
-    })
+    resp = client.post(
+        "/api/commit",
+        json={
+            "content": "Redis runs on port 6379",
+            "scope": "infra",
+            "confidence": 0.95,
+            "fact_type": "observation",
+            "operation": "add",
+            "ttl_days": 7,
+        },
+    )
     assert resp.status_code == 200
     engine.commit.assert_called_once()
 
@@ -212,16 +251,21 @@ def test_query_invalid_as_of():
 
 def test_query_valid_as_of():
     client, _ = _build_client()
-    resp = client.post("/api/query", json={
-        "topic": "rate limits",
-        "as_of": "2024-01-15T12:00:00+00:00",
-    })
+    resp = client.post(
+        "/api/query",
+        json={
+            "topic": "rate limits",
+            "as_of": "2024-01-15T12:00:00+00:00",
+        },
+    )
     assert resp.status_code == 200
 
 
 def test_query_invalid_json():
     client, _ = _build_client()
-    resp = client.post("/api/query", content=b"{bad json", headers={"Content-Type": "application/json"})
+    resp = client.post(
+        "/api/query", content=b"{bad json", headers={"Content-Type": "application/json"}
+    )
     assert resp.status_code == 400
 
 
@@ -254,52 +298,67 @@ def test_conflicts_default_status():
 
 def test_resolve_missing_conflict_id():
     client, _ = _build_client()
-    resp = client.post("/api/resolve", json={
-        "resolution_type": "winner",
-        "resolution": "fact A is correct",
-    })
+    resp = client.post(
+        "/api/resolve",
+        json={
+            "resolution_type": "winner",
+            "resolution": "fact A is correct",
+        },
+    )
     assert resp.status_code == 400
     assert "conflict_id" in resp.json()["error"].lower()
 
 
 def test_resolve_missing_resolution_type():
     client, _ = _build_client()
-    resp = client.post("/api/resolve", json={
-        "conflict_id": "abc123",
-        "resolution": "fact A is correct",
-    })
+    resp = client.post(
+        "/api/resolve",
+        json={
+            "conflict_id": "abc123",
+            "resolution": "fact A is correct",
+        },
+    )
     assert resp.status_code == 400
     assert "resolution_type" in resp.json()["error"].lower()
 
 
 def test_resolve_invalid_resolution_type():
     client, _ = _build_client()
-    resp = client.post("/api/resolve", json={
-        "conflict_id": "abc123",
-        "resolution_type": "ignore",
-        "resolution": "fact A is correct",
-    })
+    resp = client.post(
+        "/api/resolve",
+        json={
+            "conflict_id": "abc123",
+            "resolution_type": "ignore",
+            "resolution": "fact A is correct",
+        },
+    )
     assert resp.status_code == 400
     assert "resolution_type" in resp.json()["error"].lower()
 
 
 def test_resolve_missing_resolution():
     client, _ = _build_client()
-    resp = client.post("/api/resolve", json={
-        "conflict_id": "abc123",
-        "resolution_type": "winner",
-    })
+    resp = client.post(
+        "/api/resolve",
+        json={
+            "conflict_id": "abc123",
+            "resolution_type": "winner",
+        },
+    )
     assert resp.status_code == 400
     assert "resolution" in resp.json()["error"].lower()
 
 
 def test_resolve_valid_passes_through():
     client, engine = _build_client()
-    resp = client.post("/api/resolve", json={
-        "conflict_id": "abc123",
-        "resolution_type": "dismissed",
-        "resolution": "These refer to different things",
-    })
+    resp = client.post(
+        "/api/resolve",
+        json={
+            "conflict_id": "abc123",
+            "resolution_type": "dismissed",
+            "resolution": "These refer to different things",
+        },
+    )
     assert resp.status_code == 200
     engine.resolve.assert_called_once()
 
@@ -338,14 +397,18 @@ def _build_batch_client():
     engine.resolve = AsyncMock(return_value={"resolved": True})
     engine.batch_commit = AsyncMock(return_value=_BATCH_RESULT)
     engine.get_stats = AsyncMock(return_value={"facts": {}, "conflicts": {}, "agents": {}})
-    engine.record_feedback = AsyncMock(return_value={"recorded": True, "conflict_id": "c1", "feedback": "true_positive"})
+    engine.record_feedback = AsyncMock(
+        return_value={"recorded": True, "conflict_id": "c1", "feedback": "true_positive"}
+    )
     engine.get_timeline = AsyncMock(return_value=[])
     engine.get_agents = AsyncMock(return_value=[])
     engine.list_facts = AsyncMock(return_value=[])
     engine.get_fact = AsyncMock(return_value=None)
     engine.get_lineage = AsyncMock(return_value=[])
     engine.get_expiring_facts = AsyncMock(return_value=[])
-    engine.bulk_dismiss = AsyncMock(return_value={"total": 0, "dismissed": 0, "failed": 0, "results": []})
+    engine.bulk_dismiss = AsyncMock(
+        return_value={"total": 0, "dismissed": 0, "failed": 0, "results": []}
+    )
     storage = MagicMock()
     storage.count_facts = AsyncMock(return_value=10)
     storage.count_conflicts = AsyncMock(return_value=2)
@@ -385,45 +448,70 @@ def test_batch_commit_too_many_facts():
 
 def test_batch_commit_fact_missing_content():
     client, _ = _build_batch_client()
-    resp = client.post("/api/batch-commit", json={"facts": [
-        {"scope": "infra", "confidence": 0.9},
-    ]})
+    resp = client.post(
+        "/api/batch-commit",
+        json={
+            "facts": [
+                {"scope": "infra", "confidence": 0.9},
+            ]
+        },
+    )
     assert resp.status_code == 400
     assert "content" in resp.json()["error"].lower()
 
 
 def test_batch_commit_fact_whitespace_content():
     client, _ = _build_batch_client()
-    resp = client.post("/api/batch-commit", json={"facts": [
-        {"content": "   ", "scope": "infra", "confidence": 0.9},
-    ]})
+    resp = client.post(
+        "/api/batch-commit",
+        json={
+            "facts": [
+                {"content": "   ", "scope": "infra", "confidence": 0.9},
+            ]
+        },
+    )
     assert resp.status_code == 400
     assert "content" in resp.json()["error"].lower()
 
 
 def test_batch_commit_fact_missing_scope():
     client, _ = _build_batch_client()
-    resp = client.post("/api/batch-commit", json={"facts": [
-        {"content": "latency is 2ms", "confidence": 0.9},
-    ]})
+    resp = client.post(
+        "/api/batch-commit",
+        json={
+            "facts": [
+                {"content": "latency is 2ms", "confidence": 0.9},
+            ]
+        },
+    )
     assert resp.status_code == 400
     assert "scope" in resp.json()["error"].lower()
 
 
 def test_batch_commit_fact_missing_confidence():
     client, _ = _build_batch_client()
-    resp = client.post("/api/batch-commit", json={"facts": [
-        {"content": "latency is 2ms", "scope": "infra"},
-    ]})
+    resp = client.post(
+        "/api/batch-commit",
+        json={
+            "facts": [
+                {"content": "latency is 2ms", "scope": "infra"},
+            ]
+        },
+    )
     assert resp.status_code == 400
     assert "confidence" in resp.json()["error"].lower()
 
 
 def test_batch_commit_fact_confidence_out_of_range():
     client, _ = _build_batch_client()
-    resp = client.post("/api/batch-commit", json={"facts": [
-        {"content": "latency is 2ms", "scope": "infra", "confidence": 1.5},
-    ]})
+    resp = client.post(
+        "/api/batch-commit",
+        json={
+            "facts": [
+                {"content": "latency is 2ms", "scope": "infra", "confidence": 1.5},
+            ]
+        },
+    )
     assert resp.status_code == 400
     assert "confidence" in resp.json()["error"].lower()
 
@@ -450,7 +538,9 @@ def test_batch_commit_success():
 
 def test_batch_commit_invalid_json():
     client, _ = _build_batch_client()
-    resp = client.post("/api/batch-commit", content=b"bad", headers={"Content-Type": "application/json"})
+    resp = client.post(
+        "/api/batch-commit", content=b"bad", headers={"Content-Type": "application/json"}
+    )
     assert resp.status_code == 400
 
 
@@ -595,7 +685,9 @@ def test_feedback_conflict_not_found_returns_400():
 
 def test_feedback_invalid_json():
     client, _ = _build_batch_client()
-    resp = client.post("/api/feedback", content=b"bad", headers={"Content-Type": "application/json"})
+    resp = client.post(
+        "/api/feedback", content=b"bad", headers={"Content-Type": "application/json"}
+    )
     assert resp.status_code == 400
 
 
@@ -603,8 +695,18 @@ def test_feedback_invalid_json():
 
 
 _TIMELINE_RESULT = [
-    {"id": "f1", "content": "Redis latency is 2ms", "scope": "infra", "valid_from": "2024-01-01T00:00:00+00:00"},
-    {"id": "f2", "content": "DB pool is 20", "scope": "infra", "valid_from": "2024-01-02T00:00:00+00:00"},
+    {
+        "id": "f1",
+        "content": "Redis latency is 2ms",
+        "scope": "infra",
+        "valid_from": "2024-01-01T00:00:00+00:00",
+    },
+    {
+        "id": "f2",
+        "content": "DB pool is 20",
+        "scope": "infra",
+        "valid_from": "2024-01-02T00:00:00+00:00",
+    },
 ]
 
 
@@ -721,8 +823,13 @@ def test_health_degraded_on_storage_error():
 
 # ── /api/facts ────────────────────────────────────────────────────────
 
-_FACT_ROW = {"id": "f1", "content": "Redis latency is 2ms", "scope": "infra",
-             "confidence": 0.9, "fact_type": "observation"}
+_FACT_ROW = {
+    "id": "f1",
+    "content": "Redis latency is 2ms",
+    "scope": "infra",
+    "confidence": 0.9,
+    "fact_type": "observation",
+}
 
 
 def test_facts_returns_list():
@@ -784,7 +891,12 @@ def test_fact_by_id_engine_error():
 
 _LINEAGE = [
     {"id": "f2", "content": "Redis latency is 1ms", "lineage_id": "lin1", "valid_until": None},
-    {"id": "f1", "content": "Redis latency is 2ms", "lineage_id": "lin1", "valid_until": "2024-01-02T00:00:00+00:00"},
+    {
+        "id": "f1",
+        "content": "Redis latency is 2ms",
+        "lineage_id": "lin1",
+        "valid_until": "2024-01-02T00:00:00+00:00",
+    },
 ]
 
 
@@ -813,7 +925,9 @@ def test_lineage_engine_error_returns_500():
 
 # ── /api/expiring ─────────────────────────────────────────────────────
 
-_EXPIRING = [{"id": "f1", "content": "cache TTL", "ttl_days": 3, "valid_until": "2024-01-04T00:00:00+00:00"}]
+_EXPIRING = [
+    {"id": "f1", "content": "cache TTL", "ttl_days": 3, "valid_until": "2024-01-04T00:00:00+00:00"}
+]
 
 
 def test_expiring_returns_facts():
@@ -861,10 +975,13 @@ _BULK_RESULT = {
 def test_bulk_dismiss_success():
     client, engine = _build_batch_client()
     engine.bulk_dismiss = AsyncMock(return_value=_BULK_RESULT)
-    resp = client.post("/api/conflicts/bulk-dismiss", json={
-        "conflict_ids": ["c1", "c2"],
-        "reason": "False positives after refactor",
-    })
+    resp = client.post(
+        "/api/conflicts/bulk-dismiss",
+        json={
+            "conflict_ids": ["c1", "c2"],
+            "reason": "False positives after refactor",
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["dismissed"] == 2
@@ -884,28 +1001,31 @@ def test_bulk_dismiss_missing_conflict_ids():
 
 def test_bulk_dismiss_not_a_list():
     client, _ = _build_batch_client()
-    resp = client.post("/api/conflicts/bulk-dismiss", json={
-        "conflict_ids": "c1", "reason": "cleanup"
-    })
+    resp = client.post(
+        "/api/conflicts/bulk-dismiss", json={"conflict_ids": "c1", "reason": "cleanup"}
+    )
     assert resp.status_code == 400
     assert "array" in resp.json()["error"].lower()
 
 
 def test_bulk_dismiss_empty_list():
     client, _ = _build_batch_client()
-    resp = client.post("/api/conflicts/bulk-dismiss", json={
-        "conflict_ids": [], "reason": "cleanup"
-    })
+    resp = client.post(
+        "/api/conflicts/bulk-dismiss", json={"conflict_ids": [], "reason": "cleanup"}
+    )
     assert resp.status_code == 400
     assert "at least one" in resp.json()["error"].lower()
 
 
 def test_bulk_dismiss_too_many():
     client, _ = _build_batch_client()
-    resp = client.post("/api/conflicts/bulk-dismiss", json={
-        "conflict_ids": [f"c{i}" for i in range(101)],
-        "reason": "cleanup",
-    })
+    resp = client.post(
+        "/api/conflicts/bulk-dismiss",
+        json={
+            "conflict_ids": [f"c{i}" for i in range(101)],
+            "reason": "cleanup",
+        },
+    )
     assert resp.status_code == 400
     assert "100" in resp.json()["error"]
 
@@ -919,16 +1039,18 @@ def test_bulk_dismiss_missing_reason():
 
 def test_bulk_dismiss_whitespace_reason():
     client, _ = _build_batch_client()
-    resp = client.post("/api/conflicts/bulk-dismiss", json={
-        "conflict_ids": ["c1"], "reason": "   "
-    })
+    resp = client.post(
+        "/api/conflicts/bulk-dismiss", json={"conflict_ids": ["c1"], "reason": "   "}
+    )
     assert resp.status_code == 400
     assert "reason" in resp.json()["error"].lower()
 
 
 def test_bulk_dismiss_partial_failure_in_body():
     partial = {
-        "total": 2, "dismissed": 1, "failed": 1,
+        "total": 2,
+        "dismissed": 1,
+        "failed": 1,
         "results": [
             {"conflict_id": "c1", "status": "dismissed"},
             {"conflict_id": "c2", "status": "skipped", "error": "not found or already resolved"},
@@ -936,17 +1058,18 @@ def test_bulk_dismiss_partial_failure_in_body():
     }
     client, engine = _build_batch_client()
     engine.bulk_dismiss = AsyncMock(return_value=partial)
-    resp = client.post("/api/conflicts/bulk-dismiss", json={
-        "conflict_ids": ["c1", "c2"], "reason": "cleanup"
-    })
+    resp = client.post(
+        "/api/conflicts/bulk-dismiss", json={"conflict_ids": ["c1", "c2"], "reason": "cleanup"}
+    )
     assert resp.status_code == 200
     assert resp.json()["failed"] == 1
 
 
 def test_bulk_dismiss_invalid_json():
     client, _ = _build_batch_client()
-    resp = client.post("/api/conflicts/bulk-dismiss", content=b"bad",
-                       headers={"Content-Type": "application/json"})
+    resp = client.post(
+        "/api/conflicts/bulk-dismiss", content=b"bad", headers={"Content-Type": "application/json"}
+    )
     assert resp.status_code == 400
 
 

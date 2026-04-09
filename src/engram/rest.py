@@ -202,6 +202,7 @@ def build_rest_routes(
         # Scope permission check
         if auth_enabled and agent_id:
             from engram.auth import check_scope_permission
+
             allowed = await check_scope_permission(storage, agent_id, scope, "write")
             if not allowed:
                 return _error(
@@ -257,13 +258,17 @@ def build_rest_routes(
         if as_of is not None:
             try:
                 from datetime import datetime
+
                 datetime.fromisoformat(str(as_of))
             except (TypeError, ValueError):
-                return _error("'as_of' must be a valid ISO 8601 datetime string (e.g. '2024-01-01T00:00:00Z').")
+                return _error(
+                    "'as_of' must be a valid ISO 8601 datetime string (e.g. '2024-01-01T00:00:00Z')."
+                )
 
         # Scope read permission check
         if auth_enabled and agent_id and scope:
             from engram.auth import check_scope_permission
+
             allowed = await check_scope_permission(storage, agent_id, scope, "read")
             if not allowed:
                 return _error(
@@ -406,9 +411,7 @@ def build_rest_routes(
             return _error("'feedback' must be 'true_positive' or 'false_positive'.")
 
         try:
-            result = await engine.record_feedback(
-                conflict_id=conflict_id, feedback=feedback
-            )
+            result = await engine.record_feedback(conflict_id=conflict_id, feedback=feedback)
         except ValueError as exc:
             return _error(str(exc))
         except Exception as exc:
@@ -534,11 +537,13 @@ def build_rest_routes(
             conflict_count = await storage.count_conflicts(status="open")
         except Exception:
             return JSONResponse({"status": "degraded"}, status_code=503)
-        return JSONResponse({
-            "status": "ok",
-            "facts": fact_count,
-            "open_conflicts": conflict_count,
-        })
+        return JSONResponse(
+            {
+                "status": "ok",
+                "facts": fact_count,
+                "open_conflicts": conflict_count,
+            }
+        )
 
     async def api_export(request: Request) -> JSONResponse:
         fmt = request.query_params.get("format", "json")
@@ -786,40 +791,40 @@ def build_rest_routes(
         return JSONResponse(result)
 
     return [
-        Route("/api/commit",        api_commit,        methods=["POST"]),
-        Route("/api/query",         api_query,         methods=["POST"]),
-        Route("/api/conflicts",     api_conflicts,     methods=["GET"]),
-        Route("/api/resolve",       api_resolve,       methods=["POST"]),
-        Route("/api/batch-commit",  api_batch_commit,  methods=["POST"]),
-        Route("/api/stats",         api_stats,         methods=["GET"]),
-        Route("/api/feedback",                  api_feedback,      methods=["POST"]),
-        Route("/api/timeline",                  api_timeline,      methods=["GET"]),
-        Route("/api/agents",                    api_agents,        methods=["GET"]),
-        Route("/api/health",                    api_health,        methods=["GET"]),
-        Route("/api/facts",                     api_facts,         methods=["GET"]),
-        Route("/api/facts/{fact_id}",           api_fact_by_id,    methods=["GET"]),
-        Route("/api/lineage/{lineage_id}",      api_lineage,       methods=["GET"]),
-        Route("/api/expiring",                  api_expiring,      methods=["GET"]),
-        Route("/api/conflicts/bulk-dismiss",    api_bulk_dismiss,  methods=["POST"]),
+        Route("/api/commit", api_commit, methods=["POST"]),
+        Route("/api/query", api_query, methods=["POST"]),
+        Route("/api/conflicts", api_conflicts, methods=["GET"]),
+        Route("/api/resolve", api_resolve, methods=["POST"]),
+        Route("/api/batch-commit", api_batch_commit, methods=["POST"]),
+        Route("/api/stats", api_stats, methods=["GET"]),
+        Route("/api/feedback", api_feedback, methods=["POST"]),
+        Route("/api/timeline", api_timeline, methods=["GET"]),
+        Route("/api/agents", api_agents, methods=["GET"]),
+        Route("/api/health", api_health, methods=["GET"]),
+        Route("/api/facts", api_facts, methods=["GET"]),
+        Route("/api/facts/{fact_id}", api_fact_by_id, methods=["GET"]),
+        Route("/api/lineage/{lineage_id}", api_lineage, methods=["GET"]),
+        Route("/api/expiring", api_expiring, methods=["GET"]),
+        Route("/api/conflicts/bulk-dismiss", api_bulk_dismiss, methods=["POST"]),
         # Webhooks
-        Route("/api/webhooks",                  api_create_webhook, methods=["POST"]),
-        Route("/api/webhooks",                  api_list_webhooks,  methods=["GET"]),
-        Route("/api/webhooks/{webhook_id}",     api_delete_webhook, methods=["DELETE"]),
+        Route("/api/webhooks", api_create_webhook, methods=["POST"]),
+        Route("/api/webhooks", api_list_webhooks, methods=["GET"]),
+        Route("/api/webhooks/{webhook_id}", api_delete_webhook, methods=["DELETE"]),
         # Rules
-        Route("/api/rules",                     api_create_rule,    methods=["POST"]),
-        Route("/api/rules",                     api_list_rules,     methods=["GET"]),
-        Route("/api/rules/{rule_id}",           api_delete_rule,    methods=["DELETE"]),
+        Route("/api/rules", api_create_rule, methods=["POST"]),
+        Route("/api/rules", api_list_rules, methods=["GET"]),
+        Route("/api/rules/{rule_id}", api_delete_rule, methods=["DELETE"]),
         # Export / Import
-        Route("/api/export",                    api_export,         methods=["GET"]),
-        Route("/api/import",                    api_import,         methods=["POST"]),
+        Route("/api/export", api_export, methods=["GET"]),
+        Route("/api/import", api_import, methods=["POST"]),
         # SSE Watch
-        Route("/api/watch",                     api_watch,          methods=["GET"]),
+        Route("/api/watch", api_watch, methods=["GET"]),
         # Scopes
-        Route("/api/scopes",                    api_register_scope, methods=["POST"]),
-        Route("/api/scopes",                    api_list_scopes,    methods=["GET"]),
-        Route("/api/scopes/{scope_name}",       api_get_scope,      methods=["GET"]),
+        Route("/api/scopes", api_register_scope, methods=["POST"]),
+        Route("/api/scopes", api_list_scopes, methods=["GET"]),
+        Route("/api/scopes/{scope_name}", api_get_scope, methods=["GET"]),
         # Diff
-        Route("/api/diff/{fact_id_a}/{fact_id_b}", api_diff,        methods=["GET"]),
+        Route("/api/diff/{fact_id_a}/{fact_id_b}", api_diff, methods=["GET"]),
         # Audit
-        Route("/api/audit",                     api_audit,          methods=["GET"]),
+        Route("/api/audit", api_audit, methods=["GET"]),
     ]

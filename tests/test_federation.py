@@ -26,28 +26,30 @@ async def test_get_facts_since(storage: Storage):
     recent = (now - timedelta(minutes=5)).isoformat()
 
     for i, ts in enumerate([old, recent]):
-        await storage.insert_fact({
-            "id": uuid.uuid4().hex,
-            "lineage_id": uuid.uuid4().hex,
-            "content": f"fact {i}",
-            "content_hash": f"hash_{i}",
-            "scope": "shared/test",
-            "confidence": 0.9,
-            "fact_type": "observation",
-            "agent_id": "agent-1",
-            "engineer": None,
-            "provenance": None,
-            "keywords": "[]",
-            "entities": "[]",
-            "artifact_hash": None,
-            "embedding": None,
-            "embedding_model": "test",
-            "embedding_ver": "1.0",
-            "committed_at": ts,
-            "valid_from": ts,
-            "valid_until": None,
-            "ttl_days": None,
-        })
+        await storage.insert_fact(
+            {
+                "id": uuid.uuid4().hex,
+                "lineage_id": uuid.uuid4().hex,
+                "content": f"fact {i}",
+                "content_hash": f"hash_{i}",
+                "scope": "shared/test",
+                "confidence": 0.9,
+                "fact_type": "observation",
+                "agent_id": "agent-1",
+                "engineer": None,
+                "provenance": None,
+                "keywords": "[]",
+                "entities": "[]",
+                "artifact_hash": None,
+                "embedding": None,
+                "embedding_model": "test",
+                "embedding_ver": "1.0",
+                "committed_at": ts,
+                "valid_from": ts,
+                "valid_until": None,
+                "ttl_days": None,
+            }
+        )
 
     # Watermark 1 hour ago should return only the recent fact
     watermark = (now - timedelta(hours=1)).isoformat()
@@ -136,6 +138,7 @@ async def test_detection_re_embeds_federated_fact(engine: EngramEngine, storage:
 def _build_federation_client(storage=None):
     """Build a Starlette test client backed by a mock storage."""
     from unittest.mock import AsyncMock
+
     if storage is None:
         storage = MagicMock()
         storage.get_facts_since = AsyncMock(return_value=[])
@@ -154,7 +157,8 @@ def test_federation_missing_after_param():
 
 def test_federation_invalid_limit_string():
     """Non-numeric limit must not crash (500) — must fall back to default 1000."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import AsyncMock
+
     storage = MagicMock()
     storage.get_facts_since = AsyncMock(return_value=[])
     routes = build_federation_routes(storage)
@@ -169,6 +173,7 @@ def test_federation_invalid_limit_string():
 def test_federation_limit_capped_at_5000():
     """limit parameter must be capped at 5000."""
     from unittest.mock import AsyncMock
+
     storage = MagicMock()
     storage.get_facts_since = AsyncMock(return_value=[])
     routes = build_federation_routes(storage)
@@ -185,6 +190,7 @@ def test_federation_limit_capped_at_5000():
 def test_federation_limit_minimum_one():
     """limit=0 or negative must be treated as limit=1."""
     from unittest.mock import AsyncMock
+
     storage = MagicMock()
     storage.get_facts_since = AsyncMock(return_value=[])
     routes = build_federation_routes(storage)

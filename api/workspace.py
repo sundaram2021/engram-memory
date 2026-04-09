@@ -43,6 +43,7 @@ async def _get_pool() -> Any:
 
 # ── Invite key auth (mirrored from api/mcp.py) ──────────────────────
 
+
 def _xor(data: bytes, enc_key: bytes, iv: bytes) -> bytes:
     stream = bytearray()
     counter = 0
@@ -95,7 +96,8 @@ async def _validate_key(invite_key: str, engram_id: str, pool: Any) -> bool:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT uses_remaining FROM invite_keys WHERE key_hash = $1 AND engram_id = $2",
-                key_hash, engram_id,
+                key_hash,
+                engram_id,
             )
         if not row:
             return False
@@ -107,6 +109,7 @@ async def _validate_key(invite_key: str, engram_id: str, pool: Any) -> bool:
 
 
 # ── Search handler ───────────────────────────────────────────────────
+
 
 async def handle_search(request: Request) -> JSONResponse:
     try:
@@ -182,15 +185,19 @@ async def handle_session_search(request: Request) -> JSONResponse:
         token = req.cookies.get("engram_session")
         if not token:
             return None
-        secret = (os.environ.get("ENGRAM_JWT_SECRET") or "engram-dev-secret-change-in-production").encode()
+        secret = (
+            os.environ.get("ENGRAM_JWT_SECRET") or "engram-dev-secret-change-in-production"
+        ).encode()
         parts = token.split(".")
         if len(parts) != 3:
             return None
         hdr, body, sig = parts
         msg = f"{hdr}.{body}".encode()
-        expected = _base64.urlsafe_b64encode(
-            _hmac.new(secret, msg, _hashlib.sha256).digest()
-        ).rstrip(b"=").decode()
+        expected = (
+            _base64.urlsafe_b64encode(_hmac.new(secret, msg, _hashlib.sha256).digest())
+            .rstrip(b"=")
+            .decode()
+        )
         if not _hmac.compare_digest(sig, expected):
             return None
         padded = body + "=" * (4 - len(body) % 4)
@@ -217,7 +224,8 @@ async def handle_session_search(request: Request) -> JSONResponse:
         async with pool.acquire() as conn:
             owns = await conn.fetchrow(
                 "SELECT 1 FROM user_workspaces WHERE user_id = $1 AND engram_id = $2",
-                session["sub"], engram_id,
+                session["sub"],
+                engram_id,
             )
     except Exception:
         owns = None
@@ -279,9 +287,9 @@ async def handle_options(request: Request) -> Response:
 
 app = Starlette(
     routes=[
-        Route("/workspace/search",  handle_search,         methods=["POST"]),
-        Route("/workspace/search",  handle_options,        methods=["OPTIONS"]),
+        Route("/workspace/search", handle_search, methods=["POST"]),
+        Route("/workspace/search", handle_options, methods=["OPTIONS"]),
         Route("/workspace/session", handle_session_search, methods=["GET"]),
-        Route("/workspace/{path:path}", handle_search,     methods=["POST"]),
+        Route("/workspace/{path:path}", handle_search, methods=["POST"]),
     ]
 )

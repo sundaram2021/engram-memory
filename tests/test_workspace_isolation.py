@@ -185,13 +185,11 @@ async def test_close_validity_window_by_fact_id_scoped_to_workspace(ws_alpha, ws
 async def test_expire_ttl_facts_isolated_by_workspace(ws_alpha, ws_beta):
     """TTL expiry in beta must not expire alpha's facts."""
     # Use ttl_days=0 to ensure immediate expiry
-    fact_a = _make_fact(workspace_id="alpha", ttl_days=0,
-                        committed_at=_past_iso(1))
+    fact_a = _make_fact(workspace_id="alpha", ttl_days=0, committed_at=_past_iso(1))
     fact_a["valid_from"] = fact_a["committed_at"]
     await ws_alpha.insert_fact(fact_a)
 
-    fact_b = _make_fact(workspace_id="beta", ttl_days=0,
-                        committed_at=_past_iso(1))
+    fact_b = _make_fact(workspace_id="beta", ttl_days=0, committed_at=_past_iso(1))
     fact_b["valid_from"] = fact_b["committed_at"]
     await ws_beta.insert_fact(fact_b)
 
@@ -245,9 +243,7 @@ async def test_get_facts_by_rowids_filters_by_workspace(ws_alpha, ws_beta):
     await ws_alpha.insert_fact(fact_a)
 
     # Retrieve the rowid of alpha's fact via direct DB query
-    cursor = await ws_alpha.db.execute(
-        "SELECT rowid FROM facts WHERE id = ?", (fact_a["id"],)
-    )
+    cursor = await ws_alpha.db.execute("SELECT rowid FROM facts WHERE id = ?", (fact_a["id"],))
     row = await cursor.fetchone()
     alpha_rowid = row[0]
 
@@ -269,9 +265,7 @@ async def test_get_promotable_ephemeral_facts_isolated(ws_alpha, ws_beta):
     """Promotable ephemeral facts must only come from the calling workspace."""
     fact_a = _make_fact(workspace_id="alpha", durability="ephemeral")
     await ws_alpha.insert_fact(fact_a)
-    await ws_alpha.db.execute(
-        "UPDATE facts SET query_hits = 5 WHERE id = ?", (fact_a["id"],)
-    )
+    await ws_alpha.db.execute("UPDATE facts SET query_hits = 5 WHERE id = ?", (fact_a["id"],))
     await ws_alpha.db.commit()
 
     # Beta should not see alpha's promotable ephemeral facts

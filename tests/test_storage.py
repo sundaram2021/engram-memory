@@ -63,7 +63,9 @@ def _fact(
     }
 
 
-def _conflict(fact_a_id: str, fact_b_id: str, status: str = "open", tier: str = "tier0_entity") -> dict:
+def _conflict(
+    fact_a_id: str, fact_b_id: str, status: str = "open", tier: str = "tier0_entity"
+) -> dict:
     return {
         "id": uuid.uuid4().hex,
         "fact_a_id": fact_a_id,
@@ -365,10 +367,10 @@ async def test_retire_stale_facts(storage: Storage):
 async def test_get_expiring_facts(storage: Storage):
     # get_expiring_facts looks for facts where valid_until IS NOT NULL and
     # is within the window.  We pre-set valid_until directly.
-    soon = _fact(ttl_days=3, content="expiring soon",
-                 valid_until=_ts(+3))   # expires in 3 days
-    later = _fact(ttl_days=30, content="not expiring soon",
-                  valid_until=_ts(+30))  # expires in 30 days
+    soon = _fact(ttl_days=3, content="expiring soon", valid_until=_ts(+3))  # expires in 3 days
+    later = _fact(
+        ttl_days=30, content="not expiring soon", valid_until=_ts(+30)
+    )  # expires in 30 days
     no_ttl = _fact(content="no ttl fact")
 
     for f in (soon, later, no_ttl):

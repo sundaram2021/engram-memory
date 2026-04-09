@@ -3,7 +3,7 @@
 import json
 import pytest
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from click.testing import CliRunner
 
 from engram.cli import main, _MCP_CLIENTS
@@ -38,15 +38,17 @@ class TestVerifyCommand:
     def temp_home(self, tmp_path):
         """Create a temporary home directory for tests."""
         workspace_path = tmp_path / ".engram" / "workspace.json"
-        with patch("pathlib.Path.home", return_value=tmp_path), \
-             patch("engram.workspace.WORKSPACE_PATH", workspace_path), \
-             patch("engram.cli._MCP_CLIENTS", _rebased_mcp_clients(tmp_path)):
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch("engram.workspace.WORKSPACE_PATH", workspace_path),
+            patch("engram.cli._MCP_CLIENTS", _rebased_mcp_clients(tmp_path)),
+        ):
             yield tmp_path
 
     def test_verify_no_workspace(self, cli_runner, temp_home):
         """Test verify when no workspace.json exists."""
         result = cli_runner.invoke(main, ["verify"])
-        
+
         assert result.exit_code == 0  # Command runs, but shows failures
         assert "✗" in result.output
         assert "~/.engram/workspace.json not found" in result.output
@@ -58,19 +60,23 @@ class TestVerifyCommand:
         workspace_dir = temp_home / ".engram"
         workspace_dir.mkdir(parents=True)
         workspace_file = workspace_dir / "workspace.json"
-        workspace_file.write_text(json.dumps({
-            "engram_id": "ENG-TEST-1234",
-            "db_url": "",  # Local mode
-            "schema": "engram",
-            "anonymous_mode": False,
-            "anon_agents": False,
-            "key_generation": 0,
-            "is_creator": True,
-        }))
-        
+        workspace_file.write_text(
+            json.dumps(
+                {
+                    "engram_id": "ENG-TEST-1234",
+                    "db_url": "",  # Local mode
+                    "schema": "engram",
+                    "anonymous_mode": False,
+                    "anon_agents": False,
+                    "key_generation": 0,
+                    "is_creator": True,
+                }
+            )
+        )
+
         with patch("pathlib.Path.home", return_value=temp_home):
             result = cli_runner.invoke(main, ["verify"])
-        
+
         assert result.exit_code == 0
         assert "✓" in result.output
         assert "workspace.json exists" in result.output
@@ -82,10 +88,10 @@ class TestVerifyCommand:
         workspace_dir.mkdir(parents=True)
         workspace_file = workspace_dir / "workspace.json"
         workspace_file.write_text("not valid json {")
-        
+
         with patch("pathlib.Path.home", return_value=temp_home):
             result = cli_runner.invoke(main, ["verify"])
-        
+
         assert result.exit_code == 0
         assert "✗" in result.output
         assert "invalid JSON" in result.output
@@ -96,15 +102,19 @@ class TestVerifyCommand:
         workspace_dir = temp_home / ".engram"
         workspace_dir.mkdir(parents=True)
         workspace_file = workspace_dir / "workspace.json"
-        workspace_file.write_text(json.dumps({
-            "engram_id": "ENG-TEST-1234",
-            "db_url": "",
-            "schema": "engram",
-        }))
-        
+        workspace_file.write_text(
+            json.dumps(
+                {
+                    "engram_id": "ENG-TEST-1234",
+                    "db_url": "",
+                    "schema": "engram",
+                }
+            )
+        )
+
         with patch("pathlib.Path.home", return_value=temp_home):
             result = cli_runner.invoke(main, ["verify"])
-        
+
         assert result.exit_code == 0
         assert "✗" in result.output
         assert "not found in any IDE MCP config" in result.output
@@ -115,28 +125,36 @@ class TestVerifyCommand:
         workspace_dir = temp_home / ".engram"
         workspace_dir.mkdir(parents=True)
         workspace_file = workspace_dir / "workspace.json"
-        workspace_file.write_text(json.dumps({
-            "engram_id": "ENG-TEST-1234",
-            "db_url": "",
-            "schema": "engram",
-        }))
-        
+        workspace_file.write_text(
+            json.dumps(
+                {
+                    "engram_id": "ENG-TEST-1234",
+                    "db_url": "",
+                    "schema": "engram",
+                }
+            )
+        )
+
         # Create Cursor MCP config with engram
         cursor_dir = temp_home / ".cursor"
         cursor_dir.mkdir(parents=True)
         mcp_config = cursor_dir / "mcp.json"
-        mcp_config.write_text(json.dumps({
-            "mcpServers": {
-                "engram": {
-                    "command": "uvx",
-                    "args": ["--from", "engram-team@latest", "engram", "serve"],
+        mcp_config.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "engram": {
+                            "command": "uvx",
+                            "args": ["--from", "engram-team@latest", "engram", "serve"],
+                        }
+                    }
                 }
-            }
-        }))
-        
+            )
+        )
+
         with patch("pathlib.Path.home", return_value=temp_home):
             result = cli_runner.invoke(main, ["verify"])
-        
+
         assert result.exit_code == 0
         assert "✓" in result.output
         assert "Cursor" in result.output
@@ -147,16 +165,20 @@ class TestVerifyCommand:
         workspace_dir = temp_home / ".engram"
         workspace_dir.mkdir(parents=True)
         workspace_file = workspace_dir / "workspace.json"
-        workspace_file.write_text(json.dumps({
-            "engram_id": "ENG-TEST-1234",
-            "db_url": "",
-            "schema": "engram",
-            "anonymous_mode": True,
-        }))
-        
+        workspace_file.write_text(
+            json.dumps(
+                {
+                    "engram_id": "ENG-TEST-1234",
+                    "db_url": "",
+                    "schema": "engram",
+                    "anonymous_mode": True,
+                }
+            )
+        )
+
         with patch("pathlib.Path.home", return_value=temp_home):
             result = cli_runner.invoke(main, ["verify", "--verbose"])
-        
+
         assert result.exit_code == 0
         # Verbose should show engram_id and schema details
         assert "engram_id:" in result.output
@@ -168,25 +190,27 @@ class TestVerifyCommand:
         workspace_dir = temp_home / ".engram"
         workspace_dir.mkdir(parents=True)
         workspace_file = workspace_dir / "workspace.json"
-        workspace_file.write_text(json.dumps({
-            "engram_id": "ENG-TEST-1234",
-            "db_url": "",
-            "schema": "engram",
-        }))
-        
+        workspace_file.write_text(
+            json.dumps(
+                {
+                    "engram_id": "ENG-TEST-1234",
+                    "db_url": "",
+                    "schema": "engram",
+                }
+            )
+        )
+
         # Create Cursor MCP config with engram
         cursor_dir = temp_home / ".cursor"
         cursor_dir.mkdir(parents=True)
         mcp_config = cursor_dir / "mcp.json"
-        mcp_config.write_text(json.dumps({
-            "mcpServers": {
-                "engram": {"command": "uvx", "args": ["engram", "serve"]}
-            }
-        }))
-        
+        mcp_config.write_text(
+            json.dumps({"mcpServers": {"engram": {"command": "uvx", "args": ["engram", "serve"]}}})
+        )
+
         with patch("pathlib.Path.home", return_value=temp_home):
             result = cli_runner.invoke(main, ["verify"])
-        
+
         assert "All checks passed" in result.output
         assert "✓ All checks passed!" in result.output
 
@@ -195,7 +219,7 @@ class TestVerifyCommand:
         # No workspace, no configs
         with patch("pathlib.Path.home", return_value=temp_home):
             result = cli_runner.invoke(main, ["verify"])
-        
+
         assert "Some checks failed" in result.output
         assert "✗ Some checks failed" in result.output
 
@@ -210,9 +234,11 @@ class TestVerifyMCPClientDetection:
     @pytest.fixture
     def temp_home(self, tmp_path):
         workspace_path = tmp_path / ".engram" / "workspace.json"
-        with patch("pathlib.Path.home", return_value=tmp_path), \
-             patch("engram.workspace.WORKSPACE_PATH", workspace_path), \
-             patch("engram.cli._MCP_CLIENTS", _rebased_mcp_clients(tmp_path)):
+        with (
+            patch("pathlib.Path.home", return_value=tmp_path),
+            patch("engram.workspace.WORKSPACE_PATH", workspace_path),
+            patch("engram.cli._MCP_CLIENTS", _rebased_mcp_clients(tmp_path)),
+        ):
             yield tmp_path
 
     def test_detects_multiple_ides(self, cli_runner, temp_home):
@@ -221,29 +247,33 @@ class TestVerifyMCPClientDetection:
         workspace_dir = temp_home / ".engram"
         workspace_dir.mkdir(parents=True)
         workspace_file = workspace_dir / "workspace.json"
-        workspace_file.write_text(json.dumps({
-            "engram_id": "ENG-TEST-1234",
-            "db_url": "",
-            "schema": "engram",
-        }))
-        
+        workspace_file.write_text(
+            json.dumps(
+                {
+                    "engram_id": "ENG-TEST-1234",
+                    "db_url": "",
+                    "schema": "engram",
+                }
+            )
+        )
+
         # Create multiple IDE configs with engram
         # Cursor
         cursor_dir = temp_home / ".cursor"
         cursor_dir.mkdir(parents=True)
-        (cursor_dir / "mcp.json").write_text(json.dumps({
-            "mcpServers": {"engram": {"command": "uvx"}}
-        }))
-        
+        (cursor_dir / "mcp.json").write_text(
+            json.dumps({"mcpServers": {"engram": {"command": "uvx"}}})
+        )
+
         # VS Code
         vscode_dir = temp_home / ".vscode"
         vscode_dir.mkdir(parents=True)
-        (vscode_dir / "mcp.json").write_text(json.dumps({
-            "mcpServers": {"engram": {"command": "uvx"}}
-        }))
-        
+        (vscode_dir / "mcp.json").write_text(
+            json.dumps({"mcpServers": {"engram": {"command": "uvx"}}})
+        )
+
         with patch("pathlib.Path.home", return_value=temp_home):
             result = cli_runner.invoke(main, ["verify"])
-        
+
         assert "✓" in result.output
         assert "Cursor" in result.output or "VS Code" in result.output

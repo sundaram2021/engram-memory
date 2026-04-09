@@ -58,8 +58,12 @@ class EngramEngine:
     async def stop(self) -> None:
         """Stop all background tasks."""
         for task in (
-            self._detection_task, self._ttl_task, self._decay_task,
-            self._calibration_task, self._suggestion_task, self._escalation_task,
+            self._detection_task,
+            self._ttl_task,
+            self._decay_task,
+            self._calibration_task,
+            self._suggestion_task,
+            self._escalation_task,
             self._webhook_task,
         ):
             if task:
@@ -140,9 +144,7 @@ class EngramEngine:
                     "operation='delete' requires corrects_lineage (lineage_id to retire)."
                 )
             await self.storage.close_validity_window(lineage_id=corrects_lineage)
-            logger.info(
-                "Memory delete: closed lineage %s by agent %s", corrects_lineage, agent_id
-            )
+            logger.info("Memory delete: closed lineage %s by agent %s", corrects_lineage, agent_id)
             return {
                 "fact_id": None,
                 "committed_at": datetime.now(timezone.utc).isoformat(),
@@ -168,6 +170,7 @@ class EngramEngine:
         # Step 1b: Privacy enforcement — strip engineer/agent_id if workspace requires it
         try:
             from engram.workspace import read_workspace
+
             ws = read_workspace()
             if ws:
                 if ws.anonymous_mode:
@@ -230,9 +233,7 @@ class EngramEngine:
         if operation == "update" and not corrects_lineage:
             # Auto-updater: find the most semantically similar active fact in scope
             # and supersede it (MemFactory's semantic Updater pattern)
-            candidates = await self.storage.get_active_facts_with_embeddings(
-                scope=scope, limit=20
-            )
+            candidates = await self.storage.get_active_facts_with_embeddings(scope=scope, limit=20)
             best_sim = 0.0
             best_fact = None
             for candidate in candidates:
@@ -247,13 +248,16 @@ class EngramEngine:
                 supersedes_fact_id = best_fact["id"]
                 logger.info(
                     "Auto-updater: new fact will supersede fact %s (sim=%.3f) in scope '%s'",
-                    best_fact["id"][:12], best_sim, scope,
+                    best_fact["id"][:12],
+                    best_sim,
+                    scope,
                 )
             else:
                 logger.debug(
                     "Auto-updater: no match above threshold (best_sim=%.3f) in scope '%s'; "
                     "falling back to add",
-                    best_sim, scope,
+                    best_sim,
+                    scope,
                 )
 
         if corrects_lineage:
@@ -274,6 +278,7 @@ class EngramEngine:
         valid_until = None
         if ttl_days is not None and ttl_days > 0:
             from datetime import timedelta
+
             expiry = datetime.now(timezone.utc) + timedelta(days=ttl_days)
             valid_until = expiry.isoformat()
 
@@ -312,9 +317,7 @@ class EngramEngine:
         # Step 13: Queue for async detection (skip for ephemeral facts)
         if durability == "durable":
             try:
-                await asyncio.wait_for(
-                    self._detection_queue.put(fact_id), timeout=5.0
-                )
+                await asyncio.wait_for(self._detection_queue.put(fact_id), timeout=5.0)
             except asyncio.TimeoutError:
                 logger.warning(
                     "Detection queue full, skipping conflict check for %s",
@@ -362,26 +365,35 @@ class EngramEngine:
         as_of: str | None = None,
         fact_type: str | None = None,
         include_ephemeral: bool = False,
+        include_adjacent: bool = False,
     ) -> list[dict[str, Any]]:
         """Query what the team's agents collectively know about a topic.
-        
+
         Enhanced scoring (Phase 1 + Phase 2):
         - Prioritizes decisions over inferences over observations
         - Boosts facts with provenance (verified claims)
         - Rewards multi-agent corroboration
         - Penalizes facts with open conflicts
-        
+
         When ``include_ephemeral`` is True, ephemeral (scratchpad) facts are
         included in results alongside durable facts.  Ephemeral facts that
         appear in query results have their ``query_hits`` counter incremented;
         once a fact reaches 2 hits it is automatically promoted to durable
         (the "proved useful more than once" heuristic).
+
+        When ``include_adjacent`` is True and a scope is provided, the query
+        also searches sibling and parent scopes for semantically related facts.
+        Adjacent results are marked with ``adjacent=True`` and include their
+        ``original_scope`` so agents can distinguish in-scope from related facts.
         """
         limit = min(limit, 50)
 
         # Get candidate facts
         candidates = await self.storage.get_current_facts_in_scope(
-            scope=scope, fact_type=fact_type, as_of=as_of, limit=200,
+            scope=scope,
+            fact_type=fact_type,
+            as_of=as_of,
+            limit=200,
             include_ephemeral=include_ephemeral,
         )
         if not candidates:
@@ -532,21 +544,41 @@ class EngramEngine:
             is_ephemeral = fact.get("durability") == "ephemeral"
             if is_ephemeral:
                 ephemeral_ids.append(fact["id"])
-            results.append({
-                "fact_id": fact["id"],
-                "content": fact["content"],
-                "scope": fact["scope"],
-                "confidence": fact["confidence"],
-                "fact_type": fact["fact_type"],
-                "agent_id": fact["agent_id"],
-                "committed_at": fact["committed_at"],
-                "has_open_conflict": fact["id"] in open_conflict_ids,
-                "verified": fact.get("provenance") is not None,
-                "provenance": fact.get("provenance"),
-                "corroborating_agents": fact.get("corroborating_agents", 0),
-                "relevance_score": round(score, 4),
-                "durability": fact.get("durability", "durable"),
-            })
+            results.append(
+                {
+                    "fact_id": fact["id"],
+                    "content": fact["content"],
+                    "scope": fact["scope"],
+                    "confidence": fact["confidence"],
+                    "fact_type": fact["fact_type"],
+                    "agent_id": fact["agent_id"],
+                    "committed_at": fact["committed_at"],
+                    "has_open_conflict": fact["id"] in open_conflict_ids,
+                    "verified": fact.get("provenance") is not None,
+                    "provenance": fact.get("provenance"),
+                    "corroborating_agents": fact.get("corroborating_agents", 0),
+                    "relevance_score": round(score, 4),
+                    "durability": fact.get("durability", "durable"),
+                    "adjacent": False,
+                }
+            )
+
+        # Surface related facts from adjacent (sibling/parent) scopes
+        if include_adjacent and scope:
+            in_scope_ids = {r["fact_id"] for r in results}
+            adjacent_results = await self._query_adjacent_scopes(
+                topic=topic,
+                scope=scope,
+                query_emb=query_emb,
+                exclude_ids=in_scope_ids,
+                open_conflict_ids=open_conflict_ids,
+                fact_type=fact_type,
+                as_of=as_of,
+                include_ephemeral=include_ephemeral,
+            )
+            results.extend(adjacent_results)
+            results.sort(key=lambda r: r["relevance_score"], reverse=True)
+            results = results[:limit]
 
         # Track query hits on ephemeral facts and auto-promote if threshold met
         if ephemeral_ids:
@@ -561,6 +593,102 @@ class EngramEngine:
                         pf["id"][:12],
                     )
 
+        return results
+
+    async def _query_adjacent_scopes(
+        self,
+        topic: str,
+        scope: str,
+        query_emb: "np.ndarray",
+        exclude_ids: set[str],
+        open_conflict_ids: set[str],
+        fact_type: str | None = None,
+        as_of: str | None = None,
+        include_ephemeral: bool = False,
+        similarity_threshold: float = 0.6,
+        score_penalty: float = 0.8,
+    ) -> list[dict[str, Any]]:
+        """Fetch semantically related facts from sibling and parent scopes."""
+        all_scopes = await self.storage.get_distinct_scopes()
+
+        # Determine parent scope
+        parent_scope = scope.rsplit("/", 1)[0] if "/" in scope else None
+
+        # Find sibling scopes (same parent prefix, excluding current scope and its children)
+        if "/" in scope:
+            parent_prefix = scope.rsplit("/", 1)[0] + "/"
+        else:
+            parent_prefix = ""
+
+        adjacent_scopes: list[str] = []
+        for s in all_scopes:
+            # Skip the queried scope and its children
+            if s == scope or s.startswith(scope + "/"):
+                continue
+            # Include parent scope
+            if parent_scope and s == parent_scope:
+                adjacent_scopes.append(s)
+                continue
+            # Include siblings (share the same parent prefix)
+            if parent_prefix and s.startswith(parent_prefix):
+                adjacent_scopes.append(s)
+                continue
+            # For top-level scopes, all other top-level scopes are siblings
+            if not parent_prefix and "/" not in s:
+                adjacent_scopes.append(s)
+
+        if not adjacent_scopes:
+            return []
+
+        # Fetch facts from adjacent scopes
+        adjacent_facts: list[dict] = []
+        for adj_scope in adjacent_scopes:
+            facts = await self.storage.get_current_facts_in_scope(
+                scope=adj_scope,
+                fact_type=fact_type,
+                as_of=as_of,
+                limit=50,
+                include_ephemeral=include_ephemeral,
+            )
+            adjacent_facts.extend(facts)
+
+        # Score by cosine similarity and filter
+        results: list[dict[str, Any]] = []
+        for fact in adjacent_facts:
+            if fact["id"] in exclude_ids:
+                continue
+            if not fact.get("embedding"):
+                continue
+
+            fact_emb = embeddings.bytes_to_embedding(fact["embedding"])
+            sim = embeddings.cosine_similarity(query_emb, fact_emb)
+
+            if sim < similarity_threshold:
+                continue
+
+            score = sim * score_penalty
+
+            results.append(
+                {
+                    "fact_id": fact["id"],
+                    "content": fact["content"],
+                    "scope": fact["scope"],
+                    "confidence": fact["confidence"],
+                    "fact_type": fact["fact_type"],
+                    "agent_id": fact["agent_id"],
+                    "committed_at": fact["committed_at"],
+                    "has_open_conflict": fact["id"] in open_conflict_ids,
+                    "verified": fact.get("provenance") is not None,
+                    "provenance": fact.get("provenance"),
+                    "corroborating_agents": fact.get("corroborating_agents", 0),
+                    "relevance_score": round(score, 4),
+                    "durability": fact.get("durability", "durable"),
+                    "adjacent": True,
+                    "original_scope": fact["scope"],
+                }
+            )
+
+        results.sort(key=lambda r: r["relevance_score"], reverse=True)
         return results
 
     # ── engram_promote ──────────────────────────────────────────────
@@ -586,9 +714,7 @@ class EngramEngine:
 
         # Now that it's durable, queue it for conflict detection
         try:
-            await asyncio.wait_for(
-                self._detection_queue.put(fact_id), timeout=5.0
-            )
+            await asyncio.wait_for(self._detection_queue.put(fact_id), timeout=5.0)
         except asyncio.TimeoutError:
             logger.warning(
                 "Detection queue full, skipping conflict check for %s",
@@ -607,43 +733,44 @@ class EngramEngine:
     async def get_conflicts(
         self, scope: str | None = None, status: str = "open"
     ) -> list[dict[str, Any]]:
-
         """Get conflicts, optionally filtered by scope and status."""
         rows = await self.storage.get_conflicts(scope=scope, status=status)
         results = []
         for r in rows:
-            results.append({
-                "conflict_id": r["id"],
-                "fact_a": {
-                    "fact_id": r["fact_a_id"],
-                    "content": r["fact_a_content"],
-                    "scope": r["fact_a_scope"],
-                    "agent_id": r["fact_a_agent"],
-                    "confidence": r["fact_a_confidence"],
-                },
-                "fact_b": {
-                    "fact_id": r["fact_b_id"],
-                    "content": r["fact_b_content"],
-                    "scope": r["fact_b_scope"],
-                    "agent_id": r["fact_b_agent"],
-                    "confidence": r["fact_b_confidence"],
-                },
-                "detection_tier": r["detection_tier"],
-                "nli_score": r["nli_score"],
-                "explanation": r["explanation"],
-                "severity": r["severity"],
-                "status": r["status"],
-                "detected_at": r["detected_at"],
-                "resolution": r.get("resolution"),
-                "resolution_type": r.get("resolution_type"),
-                "auto_resolved": bool(r.get("auto_resolved")),
-                "escalated_at": r.get("escalated_at"),
-                "suggested_resolution": r.get("suggested_resolution"),
-                "suggested_resolution_type": r.get("suggested_resolution_type"),
-                "suggested_winning_fact_id": r.get("suggested_winning_fact_id"),
-                "suggestion_reasoning": r.get("suggestion_reasoning"),
-                "suggestion_generated_at": r.get("suggestion_generated_at"),
-            })
+            results.append(
+                {
+                    "conflict_id": r["id"],
+                    "fact_a": {
+                        "fact_id": r["fact_a_id"],
+                        "content": r["fact_a_content"],
+                        "scope": r["fact_a_scope"],
+                        "agent_id": r["fact_a_agent"],
+                        "confidence": r["fact_a_confidence"],
+                    },
+                    "fact_b": {
+                        "fact_id": r["fact_b_id"],
+                        "content": r["fact_b_content"],
+                        "scope": r["fact_b_scope"],
+                        "agent_id": r["fact_b_agent"],
+                        "confidence": r["fact_b_confidence"],
+                    },
+                    "detection_tier": r["detection_tier"],
+                    "nli_score": r["nli_score"],
+                    "explanation": r["explanation"],
+                    "severity": r["severity"],
+                    "status": r["status"],
+                    "detected_at": r["detected_at"],
+                    "resolution": r.get("resolution"),
+                    "resolution_type": r.get("resolution_type"),
+                    "auto_resolved": bool(r.get("auto_resolved")),
+                    "escalated_at": r.get("escalated_at"),
+                    "suggested_resolution": r.get("suggested_resolution"),
+                    "suggested_resolution_type": r.get("suggested_resolution_type"),
+                    "suggested_winning_fact_id": r.get("suggested_winning_fact_id"),
+                    "suggestion_reasoning": r.get("suggestion_reasoning"),
+                    "suggestion_generated_at": r.get("suggestion_generated_at"),
+                }
+            )
         return results
 
     # ── engram_resolve ───────────────────────────────────────────────
@@ -751,7 +878,9 @@ class EngramEngine:
 
         for i, item in enumerate(facts):
             if not isinstance(item, dict):
-                results.append({"index": i, "status": "error", "error": "Each fact must be a JSON object."})
+                results.append(
+                    {"index": i, "status": "error", "error": "Each fact must be a JSON object."}
+                )
                 failed += 1
                 continue
 
@@ -774,12 +903,14 @@ class EngramEngine:
                     duplicates += 1
                 else:
                     committed += 1
-                results.append({
-                    "index": i,
-                    "status": "duplicate" if is_dup else "ok",
-                    "fact_id": result.get("fact_id"),
-                    "duplicate": is_dup,
-                })
+                results.append(
+                    {
+                        "index": i,
+                        "status": "duplicate" if is_dup else "ok",
+                        "fact_id": result.get("fact_id"),
+                        "duplicate": is_dup,
+                    }
+                )
             except Exception as exc:
                 failed += 1
                 results.append({"index": i, "status": "error", "error": str(exc)})
@@ -827,9 +958,7 @@ class EngramEngine:
 
     # ── engram_timeline ───────────────────────────────────────────────
 
-    async def get_timeline(
-        self, scope: str | None = None, limit: int = 50
-    ) -> list[dict]:
+    async def get_timeline(self, scope: str | None = None, limit: int = 50) -> list[dict]:
         """Return facts ordered by valid_from for audit/timeline view.
 
         Args:
@@ -897,9 +1026,7 @@ class EngramEngine:
         from engram.export import build_json_export, build_markdown_export
 
         if format not in ("json", "markdown"):
-            raise ValueError(
-                f"Invalid format '{format}'. Supported: json, markdown"
-            )
+            raise ValueError(f"Invalid format '{format}'. Supported: json, markdown")
 
         now_iso = datetime.now(timezone.utc).isoformat()
         facts = await self.storage.get_current_facts_in_scope(
@@ -909,9 +1036,7 @@ class EngramEngine:
             as_of=now_iso,
         )
         if len(facts) >= 10000:
-            logger.warning(
-                "Export hit fact limit (10000) — some facts may be missing"
-            )
+            logger.warning("Export hit fact limit (10000) — some facts may be missing")
 
         open_conflict_ids = await self.storage.get_open_conflict_fact_ids()
         for fact in facts:
@@ -923,6 +1048,7 @@ class EngramEngine:
         anonymous_mode = False
         try:
             from engram.workspace import read_workspace
+
             ws = read_workspace()
             if ws:
                 workspace_id = ws.engram_id
@@ -1022,8 +1148,13 @@ class EngramEngine:
                     results.append({"conflict_id": cid, "status": "dismissed"})
                 else:
                     failed += 1
-                    results.append({"conflict_id": cid, "status": "skipped",
-                                    "error": "not found or already resolved"})
+                    results.append(
+                        {
+                            "conflict_id": cid,
+                            "status": "skipped",
+                            "error": "not found or already resolved",
+                        }
+                    )
             except Exception as exc:
                 failed += 1
                 results.append({"conflict_id": cid, "status": "error", "error": str(exc)})
@@ -1049,9 +1180,7 @@ class EngramEngine:
         try:
             while True:
                 fact_id = await self._detection_queue.get()
-                task = asyncio.create_task(
-                    self._detect_with_semaphore(fact_id, semaphore)
-                )
+                task = asyncio.create_task(self._detect_with_semaphore(fact_id, semaphore))
                 active.add(task)
                 task.add_done_callback(active.discard)
         except asyncio.CancelledError:
@@ -1063,9 +1192,7 @@ class EngramEngine:
                 except (asyncio.CancelledError, Exception):
                     pass
 
-    async def _detect_with_semaphore(
-        self, fact_id: str, semaphore: asyncio.Semaphore
-    ) -> None:
+    async def _detect_with_semaphore(self, fact_id: str, semaphore: asyncio.Semaphore) -> None:
         async with semaphore:
             try:
                 await self._run_detection(fact_id)
@@ -1109,7 +1236,10 @@ class EngramEngine:
         # ── Tier 0: Entity exact-match conflicts ─────────────────────
         tier0_flagged: set[str] = set()
         for entity in entities:
-            if entity.get("type") in ("numeric", "config_key", "version") and entity.get("value") is not None:
+            if (
+                entity.get("type") in ("numeric", "config_key", "version")
+                and entity.get("value") is not None
+            ):
                 conflicts = await self.storage.find_entity_conflicts(
                     entity_name=entity["name"],
                     entity_type=entity["type"],
@@ -1121,24 +1251,29 @@ class EngramEngine:
                     if c["id"] not in tier0_flagged:
                         if c["id"] not in existing_conflict_ids:
                             conflict_id = uuid.uuid4().hex
-                            await self.storage.insert_conflict({
-                                "id": conflict_id,
-                                "fact_a_id": fact_id,
-                                "fact_b_id": c["id"],
-                                "detected_at": now,
-                                "detection_tier": "tier0_entity",
-                                "nli_score": None,
-                                "explanation": (
-                                    f"Entity '{entity['name']}' has conflicting values: "
-                                    f"'{entity['value']}' vs existing value in fact {c['id'][:8]}..."
-                                ),
-                                "severity": "high",
-                                "status": "open",
-                            })
+                            await self.storage.insert_conflict(
+                                {
+                                    "id": conflict_id,
+                                    "fact_a_id": fact_id,
+                                    "fact_b_id": c["id"],
+                                    "detected_at": now,
+                                    "detection_tier": "tier0_entity",
+                                    "nli_score": None,
+                                    "explanation": (
+                                        f"Entity '{entity['name']}' has conflicting values: "
+                                        f"'{entity['value']}' vs existing value in fact {c['id'][:8]}..."
+                                    ),
+                                    "severity": "high",
+                                    "status": "open",
+                                }
+                            )
                             try:
                                 self._suggestion_queue.put_nowait(conflict_id)
                             except asyncio.QueueFull:
-                                logger.warning("Suggestion queue full, skipping suggestion for conflict %s", conflict_id[:12])
+                                logger.warning(
+                                    "Suggestion queue full, skipping suggestion for conflict %s",
+                                    conflict_id[:12],
+                                )
                             asyncio.ensure_future(self._apply_rules(conflict_id))
                             asyncio.ensure_future(self._fire_event("conflict.detected", {
                                 "conflict_id": conflict_id,
@@ -1152,7 +1287,10 @@ class EngramEngine:
         # ── Tier 2b: Cross-scope entity detection ────────────────────
         tier2b_flagged: set[str] = set()
         for entity in entities:
-            if entity.get("type") in ("numeric", "config_key", "version", "technology") and entity.get("value") is not None:
+            if (
+                entity.get("type") in ("numeric", "config_key", "version", "technology")
+                and entity.get("value") is not None
+            ):
                 cross_matches = await self.storage.find_cross_scope_entity_matches(
                     entity_name=entity["name"],
                     entity_type=entity["type"],
@@ -1165,24 +1303,29 @@ class EngramEngine:
                             continue  # Already handled by Tier 0
                         if c["id"] not in existing_conflict_ids:
                             conflict_id = uuid.uuid4().hex
-                            await self.storage.insert_conflict({
-                                "id": conflict_id,
-                                "fact_a_id": fact_id,
-                                "fact_b_id": c["id"],
-                                "detected_at": now,
-                                "detection_tier": "tier2b_cross_scope",
-                                "nli_score": None,
-                                "explanation": (
-                                    f"Cross-scope entity conflict: '{entity['name']}' differs "
-                                    f"between scope '{fact['scope']}' and '{c['scope']}'"
-                                ),
-                                "severity": "high",
-                                "status": "open",
-                            })
+                            await self.storage.insert_conflict(
+                                {
+                                    "id": conflict_id,
+                                    "fact_a_id": fact_id,
+                                    "fact_b_id": c["id"],
+                                    "detected_at": now,
+                                    "detection_tier": "tier2b_cross_scope",
+                                    "nli_score": None,
+                                    "explanation": (
+                                        f"Cross-scope entity conflict: '{entity['name']}' differs "
+                                        f"between scope '{fact['scope']}' and '{c['scope']}'"
+                                    ),
+                                    "severity": "high",
+                                    "status": "open",
+                                }
+                            )
                             try:
                                 self._suggestion_queue.put_nowait(conflict_id)
                             except asyncio.QueueFull:
-                                logger.warning("Suggestion queue full, skipping suggestion for conflict %s", conflict_id[:12])
+                                logger.warning(
+                                    "Suggestion queue full, skipping suggestion for conflict %s",
+                                    conflict_id[:12],
+                                )
                             asyncio.ensure_future(self._apply_rules(conflict_id))
                             asyncio.ensure_future(self._fire_event("conflict.detected", {
                                 "conflict_id": conflict_id,
@@ -1195,9 +1338,7 @@ class EngramEngine:
 
         # ── Tier 2: Numeric and temporal rules (parallel with Tier 1) ────
         tier2_flagged: set[str] = set()
-        scope_facts = await self.storage.get_current_facts_in_scope(
-            scope=fact["scope"], limit=50
-        )
+        scope_facts = await self.storage.get_current_facts_in_scope(scope=fact["scope"], limit=50)
         for candidate in scope_facts:
             if candidate["id"] == fact_id:
                 continue
@@ -1210,28 +1351,35 @@ class EngramEngine:
                 for e_cand in c_entities:
                     if e_cand.get("type") != "numeric" or e_cand.get("value") is None:
                         continue
-                    if e_new["name"] == e_cand["name"] and str(e_new["value"]) != str(e_cand["value"]):
+                    if e_new["name"] == e_cand["name"] and str(e_new["value"]) != str(
+                        e_cand["value"]
+                    ):
                         if candidate["id"] not in tier2_flagged:
                             if candidate["id"] not in existing_conflict_ids:
                                 conflict_id = uuid.uuid4().hex
-                                await self.storage.insert_conflict({
-                                    "id": conflict_id,
-                                    "fact_a_id": fact_id,
-                                    "fact_b_id": candidate["id"],
-                                    "detected_at": now,
-                                    "detection_tier": "tier2_numeric",
-                                    "nli_score": None,
-                                    "explanation": (
-                                        f"Numeric conflict: '{e_new['name']}' = {e_new['value']} "
-                                        f"vs {e_cand['value']}"
-                                    ),
-                                    "severity": "high",
-                                    "status": "open",
-                                })
+                                await self.storage.insert_conflict(
+                                    {
+                                        "id": conflict_id,
+                                        "fact_a_id": fact_id,
+                                        "fact_b_id": candidate["id"],
+                                        "detected_at": now,
+                                        "detection_tier": "tier2_numeric",
+                                        "nli_score": None,
+                                        "explanation": (
+                                            f"Numeric conflict: '{e_new['name']}' = {e_new['value']} "
+                                            f"vs {e_cand['value']}"
+                                        ),
+                                        "severity": "high",
+                                        "status": "open",
+                                    }
+                                )
                                 try:
                                     self._suggestion_queue.put_nowait(conflict_id)
                                 except asyncio.QueueFull:
-                                    logger.warning("Suggestion queue full, skipping suggestion for conflict %s", conflict_id[:12])
+                                    logger.warning(
+                                        "Suggestion queue full, skipping suggestion for conflict %s",
+                                        conflict_id[:12],
+                                    )
                                 asyncio.ensure_future(self._apply_rules(conflict_id))
                                 asyncio.ensure_future(self._fire_event("conflict.detected", {
                                     "conflict_id": conflict_id,
@@ -1314,27 +1462,36 @@ class EngramEngine:
                 if contradiction_score > self._nli_threshold_high:
                     already = await self.storage.conflict_exists(fact_id, candidate["id"])
                     if not already:
-                        severity = "high" if fact.get("engineer") != candidate.get("engineer") else "medium"
+                        severity = (
+                            "high"
+                            if fact.get("engineer") != candidate.get("engineer")
+                            else "medium"
+                        )
                         conflict_id = uuid.uuid4().hex
-                        await self.storage.insert_conflict({
-                            "id": conflict_id,
-                            "fact_a_id": fact_id,
-                            "fact_b_id": candidate["id"],
-                            "detected_at": now,
-                            "detection_tier": "tier1_nli",
-                            "nli_score": contradiction_score,
-                            "explanation": (
-                                f"Semantic contradiction (NLI score: {contradiction_score:.2f}): "
-                                f'"{fact["content"][:80]}..." vs '
-                                f'"{candidate["content"][:80]}..."'
-                            ),
-                            "severity": severity,
-                            "status": "open",
-                        })
+                        await self.storage.insert_conflict(
+                            {
+                                "id": conflict_id,
+                                "fact_a_id": fact_id,
+                                "fact_b_id": candidate["id"],
+                                "detected_at": now,
+                                "detection_tier": "tier1_nli",
+                                "nli_score": contradiction_score,
+                                "explanation": (
+                                    f"Semantic contradiction (NLI score: {contradiction_score:.2f}): "
+                                    f'"{fact["content"][:80]}..." vs '
+                                    f'"{candidate["content"][:80]}..."'
+                                ),
+                                "severity": severity,
+                                "status": "open",
+                            }
+                        )
                         try:
                             self._suggestion_queue.put_nowait(conflict_id)
                         except asyncio.QueueFull:
-                            logger.warning("Suggestion queue full, skipping suggestion for conflict %s", conflict_id[:12])
+                            logger.warning(
+                                "Suggestion queue full, skipping suggestion for conflict %s",
+                                conflict_id[:12],
+                            )
                         asyncio.ensure_future(self._apply_rules(conflict_id))
                         asyncio.ensure_future(self._fire_event("conflict.detected", {
                             "conflict_id": conflict_id,
@@ -1463,7 +1620,8 @@ class EngramEngine:
         )
         logger.info(
             "Auto-escalated conflict %s — preferred newer fact %s",
-            conflict["id"][:12], winner["id"][:8],
+            conflict["id"][:12],
+            winner["id"][:8],
         )
 
     def _get_nli_model(self) -> Any:
@@ -1471,6 +1629,7 @@ class EngramEngine:
         if self._nli_model is None:
             try:
                 from sentence_transformers import CrossEncoder
+
                 self._nli_model = CrossEncoder("cross-encoder/nli-MiniLM2-L6-H768")
                 logger.info("NLI model loaded: cross-encoder/nli-MiniLM2-L6-H768")
             except Exception:
@@ -1484,46 +1643,45 @@ class EngramEngine:
         self, fact_id: str, fact_emb: np.ndarray, agent_id: str, scope: str
     ) -> None:
         """Check if this fact corroborates existing facts from other agents.
-        
+
         When multiple independent agents commit semantically similar facts,
         increment the corroboration counter on all matching facts. This signals
         multi-agent consensus without requiring explicit quorum commits.
-        
+
         Threshold: 0.85 cosine similarity (high semantic overlap)
         """
         try:
             # Get active facts in scope with embeddings (exclude same agent)
-            candidates = await self.storage.get_active_facts_with_embeddings(
-                scope=scope, limit=50
-            )
-            
+            candidates = await self.storage.get_active_facts_with_embeddings(scope=scope, limit=50)
+
             corroborated_ids: list[str] = []
             for candidate in candidates:
                 # Skip facts from the same agent (not independent corroboration)
                 if candidate["agent_id"] == agent_id:
                     continue
-                
+
                 # Skip the fact we just inserted
                 if candidate["id"] == fact_id:
                     continue
-                
+
                 if candidate.get("embedding"):
                     c_emb = embeddings.bytes_to_embedding(candidate["embedding"])
                     sim = embeddings.cosine_similarity(fact_emb, c_emb)
-                    
+
                     # High similarity = corroboration
                     if sim >= 0.85:
                         corroborated_ids.append(candidate["id"])
-            
+
             # Increment corroboration count on all matching facts (including new one)
             if corroborated_ids:
                 await self.storage.increment_corroboration(fact_id)
                 for cid in corroborated_ids:
                     await self.storage.increment_corroboration(cid)
-                
+
                 logger.debug(
                     "Corroboration detected: fact %s matches %d existing fact(s) from other agents",
-                    fact_id[:12], len(corroborated_ids)
+                    fact_id[:12],
+                    len(corroborated_ids),
                 )
         except Exception:
             logger.exception("Corroboration check failed for fact %s", fact_id)
@@ -1594,7 +1752,10 @@ class EngramEngine:
                     if abs(new_threshold - self._nli_threshold_high) > 0.001:
                         logger.info(
                             "NLI calibration: threshold %.3f -> %.3f (fp_rate=%.2f, n=%d)",
-                            self._nli_threshold_high, new_threshold, fp_rate, total,
+                            self._nli_threshold_high,
+                            new_threshold,
+                            fp_rate,
+                            total,
                         )
                         self._nli_threshold_high = new_threshold
             except asyncio.CancelledError:

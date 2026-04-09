@@ -106,9 +106,7 @@ async def generate_suggestion(
         }
 
     except Exception:
-        logger.exception(
-            "LLM suggestion failed for conflict %s", conflict.get("id", "unknown")
-        )
+        logger.exception("LLM suggestion failed for conflict %s", conflict.get("id", "unknown"))
         return None
 
 

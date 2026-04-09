@@ -73,6 +73,7 @@ async def _get_pool() -> Any:
 
 # ── Password hashing (PBKDF2, no external deps) ──────────────────────
 
+
 def _hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 260_000)
@@ -90,6 +91,7 @@ def _verify_password(password: str, stored: str) -> bool:
 
 # ── JWT (HMAC-SHA256, no external deps) ─────────────────────────────
 
+
 def _jwt_secret() -> bytes:
     secret = JWT_SECRET or os.environ.get("ENGRAM_JWT_SECRET", "")
     if not secret:
@@ -100,11 +102,13 @@ def _jwt_secret() -> bytes:
 
 def _create_jwt(user_id: str, email: str) -> str:
     header = base64.urlsafe_b64encode(b'{"alg":"HS256"}').rstrip(b"=").decode()
-    payload_bytes = json.dumps({
-        "sub": user_id,
-        "email": email,
-        "exp": int(time.time()) + 86400 * 30,  # 30 days
-    }).encode()
+    payload_bytes = json.dumps(
+        {
+            "sub": user_id,
+            "email": email,
+            "exp": int(time.time()) + 86400 * 30,  # 30 days
+        }
+    ).encode()
     body = base64.urlsafe_b64encode(payload_bytes).rstrip(b"=").decode()
     msg = f"{header}.{body}".encode()
     sig = hmac.new(_jwt_secret(), msg, hashlib.sha256).digest()
@@ -155,6 +159,7 @@ def _set_session_cookie(response: Response, user_id: str, email: str) -> None:
 
 # ── Invite key verification (mirrored from workspace.py) ─────────────
 
+
 def _decode_invite_key(invite_key: str) -> dict[str, Any]:
     if not invite_key.startswith("ek_live_"):
         raise ValueError("Invalid invite key format")
@@ -201,6 +206,7 @@ def _invite_key_hash(invite_key: str) -> str:
 
 # ── Handlers ─────────────────────────────────────────────────────────
 
+
 async def handle_signup(request: Request) -> JSONResponse:
     try:
         body = await request.json()
@@ -230,7 +236,9 @@ async def handle_signup(request: Request) -> JSONResponse:
                 return JSONResponse({"error": "Email already registered"}, status_code=409)
             await conn.execute(
                 "INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)",
-                user_id, email, password_hash,
+                user_id,
+                email,
+                password_hash,
             )
     except Exception as exc:
         return JSONResponse({"error": f"Signup failed: {exc}"}, status_code=500)
@@ -259,9 +267,7 @@ async def handle_login(request: Request) -> JSONResponse:
 
     try:
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT id, password_hash FROM users WHERE email = $1", email
-            )
+            row = await conn.fetchrow("SELECT id, password_hash FROM users WHERE email = $1", email)
     except Exception as exc:
         return JSONResponse({"error": f"Login failed: {exc}"}, status_code=500)
 
@@ -313,11 +319,13 @@ async def handle_me(request: Request) -> JSONResponse:
         return v
 
     ws_list = [{k: _ser(v) for k, v in dict(r).items()} for r in workspaces]
-    return JSONResponse({
-        "user_id": user["id"],
-        "email": user["email"],
-        "workspaces": ws_list,
-    })
+    return JSONResponse(
+        {
+            "user_id": user["id"],
+            "email": user["email"],
+            "workspaces": ws_list,
+        }
+    )
 
 
 async def handle_connect_workspace(request: Request) -> JSONResponse:
@@ -353,7 +361,8 @@ async def handle_connect_workspace(request: Request) -> JSONResponse:
             key_hash = _invite_key_hash(invite_key)
             key_row = await conn.fetchrow(
                 "SELECT uses_remaining FROM invite_keys WHERE key_hash = $1 AND engram_id = $2",
-                key_hash, engram_id,
+                key_hash,
+                engram_id,
             )
             if not key_row:
                 return JSONResponse({"error": "Invalid or revoked invite key"}, status_code=401)
@@ -363,7 +372,8 @@ async def handle_connect_workspace(request: Request) -> JSONResponse:
                 """INSERT INTO user_workspaces (user_id, engram_id, role)
                    VALUES ($1, $2, 'owner')
                    ON CONFLICT (user_id, engram_id) DO NOTHING""",
-                session["sub"], engram_id,
+                session["sub"],
+                engram_id,
             )
     except Exception as exc:
         return JSONResponse({"error": f"Database error: {exc}"}, status_code=500)
@@ -372,18 +382,22 @@ async def handle_connect_workspace(request: Request) -> JSONResponse:
 
 
 async def handle_options(request: Request) -> Response:
-    return Response(headers={
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-    })
+    return Response(
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+        }
+    )
 
 
-app = Starlette(routes=[
-    Route("/auth/signup",            handle_signup,             methods=["POST"]),
-    Route("/auth/login",             handle_login,              methods=["POST"]),
-    Route("/auth/logout",            handle_logout,             methods=["POST"]),
-    Route("/auth/me",                handle_me,                 methods=["GET"]),
-    Route("/auth/connect-workspace", handle_connect_workspace,  methods=["POST"]),
-    Route("/auth/{path:path}",       handle_options,            methods=["OPTIONS"]),
-])
+app = Starlette(
+    routes=[
+        Route("/auth/signup", handle_signup, methods=["POST"]),
+        Route("/auth/login", handle_login, methods=["POST"]),
+        Route("/auth/logout", handle_logout, methods=["POST"]),
+        Route("/auth/me", handle_me, methods=["GET"]),
+        Route("/auth/connect-workspace", handle_connect_workspace, methods=["POST"]),
+        Route("/auth/{path:path}", handle_options, methods=["OPTIONS"]),
+    ]
+)

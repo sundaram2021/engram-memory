@@ -26,13 +26,13 @@ WORKSPACE_PATH = Path.home() / ".engram" / "workspace.json"
 @dataclass
 class WorkspaceConfig:
     engram_id: str
-    db_url: str          # empty string = local SQLite mode
-    schema: str = "engram"         # PostgreSQL schema name for Engram tables
-    anonymous_mode: bool = False   # strip engineer field on every INSERT
-    anon_agents: bool = False      # randomize agent_id each session
-    display_name: str = ""         # optional user-facing display name
-    key_generation: int = 0        # must match DB key_generation; mismatch = disconnected
-    is_creator: bool = False       # True only for the agent who ran engram_init
+    db_url: str  # empty string = local SQLite mode
+    schema: str = "engram"  # PostgreSQL schema name for Engram tables
+    anonymous_mode: bool = False  # strip engineer field on every INSERT
+    anon_agents: bool = False  # randomize agent_id each session
+    display_name: str = ""  # optional user-facing display name
+    key_generation: int = 0  # must match DB key_generation; mismatch = disconnected
+    is_creator: bool = False  # True only for the agent who ran engram_init
 
 
 def read_workspace() -> WorkspaceConfig | None:
@@ -223,15 +223,17 @@ def generate_invite_key(
     enc_key = secrets.token_bytes(32)
     iv = secrets.token_bytes(16)
 
-    payload = json.dumps({
-        "db_url": db_url,
-        "engram_id": engram_id,
-        "schema": schema,
-        "expires_at": int(time.time()) + expires_days * 86400,
-        "uses_remaining": uses_remaining,
-        "created_at": int(time.time()),
-        "key_generation": key_generation,
-    }).encode()
+    payload = json.dumps(
+        {
+            "db_url": db_url,
+            "engram_id": engram_id,
+            "schema": schema,
+            "expires_at": int(time.time()) + expires_days * 86400,
+            "uses_remaining": uses_remaining,
+            "created_at": int(time.time()),
+            "key_generation": key_generation,
+        }
+    ).encode()
 
     ciphertext = _xor(payload, enc_key, iv)
     mac = hmac.new(enc_key, iv + ciphertext, hashlib.sha256).digest()

@@ -80,7 +80,9 @@ class FederationClient:
 
         logger.info(
             "Federation sync: fetched=%d ingested=%d duplicates=%d",
-            len(facts), ingested, duplicates,
+            len(facts),
+            ingested,
+            duplicates,
         )
         return {
             "fetched": len(facts),

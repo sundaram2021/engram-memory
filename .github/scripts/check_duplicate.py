@@ -4,13 +4,12 @@ Posts a comment and adds a label if a likely duplicate is found.
 """
 
 import os
-import sys
 import numpy as np
 from openai import OpenAI
 from github import Github
 
 SIMILARITY_THRESHOLD = 0.88  # tune between 0.85–0.92
-MAX_ISSUES_TO_CHECK = 200    # avoid rate limits on large repos
+MAX_ISSUES_TO_CHECK = 200  # avoid rate limits on large repos
 EMBED_MODEL = "text-embedding-3-small"
 
 
@@ -48,7 +47,8 @@ def main():
 
     # Fetch open issues excluding the new one
     open_issues = [
-        i for i in repo.get_issues(state="open")
+        i
+        for i in repo.get_issues(state="open")
         if i.number != new_issue_number and i.pull_request is None
     ][:MAX_ISSUES_TO_CHECK]
 
@@ -74,9 +74,7 @@ def main():
     duplicates.sort(key=lambda x: x[0], reverse=True)
 
     # Build comment
-    lines = [
-        "**Possible duplicate issue detected** — this issue may already be tracked:\n"
-    ]
+    lines = ["**Possible duplicate issue detected** — this issue may already be tracked:\n"]
     for score, issue in duplicates[:5]:
         lines.append(f"- #{issue.number} ({score:.0%} similar): [{issue.title}]({issue.html_url})")
     lines.append(

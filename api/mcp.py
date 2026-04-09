@@ -144,6 +144,7 @@ async def _get_pool() -> Any:
         raise RuntimeError("ENGRAM_DB_URL not configured")
     if _pool is None:
         import asyncpg
+
         # Bootstrap: create schema + tables with a single connection
         conn = await asyncpg.connect(DB_URL)
         try:
@@ -198,13 +199,15 @@ def _generate_invite_key(
     """Returns (invite_key, key_hash)."""
     enc_key = secrets.token_bytes(32)
     iv = secrets.token_bytes(16)
-    payload = json.dumps({
-        "engram_id": engram_id,
-        "expires_at": int(time.time()) + expires_days * 86400,
-        "uses_remaining": uses_remaining,
-        "created_at": int(time.time()),
-        "key_generation": key_generation,
-    }).encode()
+    payload = json.dumps(
+        {
+            "engram_id": engram_id,
+            "expires_at": int(time.time()) + expires_days * 86400,
+            "uses_remaining": uses_remaining,
+            "created_at": int(time.time()),
+            "key_generation": key_generation,
+        }
+    ).encode()
     ciphertext = _xor(payload, enc_key, iv)
     mac = hmac.new(enc_key, iv + ciphertext, hashlib.sha256).digest()
     token = enc_key + iv + mac + ciphertext
@@ -254,6 +257,7 @@ def _invite_key_hash(invite_key: str) -> str:
 
 # ── Auth helper ──────────────────────────────────────────────────────
 
+
 async def _auth_workspace(request: Request) -> str | None:
     """Return workspace_id if the request carries a valid invite key, else None."""
     auth = request.headers.get("Authorization", "")
@@ -261,7 +265,7 @@ async def _auth_workspace(request: Request) -> str | None:
         return None
     invite_key = auth[7:]
     try:
-        payload = _decode_invite_key(invite_key)
+        _decode_invite_key(invite_key)
     except ValueError:
         return None
     key_hash = _invite_key_hash(invite_key)
@@ -307,7 +311,9 @@ async def _detect_conflicts(
                    WHERE workspace_id = $1 AND scope = $2 AND valid_until IS NULL
                      AND id != $3
                    ORDER BY committed_at DESC LIMIT 30""",
-                workspace_id, scope, new_fact_id,
+                workspace_id,
+                scope,
+                new_fact_id,
             )
             for row in existing:
                 old_content = row["content"]
@@ -328,13 +334,18 @@ async def _detect_conflicts(
                                severity, workspace_id)
                            VALUES ($1, $2, $3, $4, 'medium', $5)
                            ON CONFLICT DO NOTHING""",
-                        cid, new_fact_id, row["id"], explanation, workspace_id,
+                        cid,
+                        new_fact_id,
+                        row["id"],
+                        explanation,
+                        workspace_id,
                     )
     except Exception as exc:
         logger.warning("Conflict detection failed: %s", exc)
 
 
 # ── Tool implementations ─────────────────────────────────────────────
+
 
 async def _tool_status(workspace_id: str | None, pool: Any) -> dict:
     if workspace_id is None:
@@ -370,12 +381,17 @@ async def _tool_init(pool: Any, anonymous_mode: bool = False, anon_agents: bool 
     async with pool.acquire() as conn:
         await conn.execute(
             "INSERT INTO workspaces (engram_id, anonymous_mode, anon_agents) VALUES ($1, $2, $3)",
-            engram_id, anonymous_mode, anon_agents,
+            engram_id,
+            anonymous_mode,
+            anon_agents,
         )
         await conn.execute(
             """INSERT INTO invite_keys (key_hash, engram_id, expires_at, uses_remaining)
                VALUES ($1, $2, $3, $4)""",
-            key_hash, engram_id, expires_ts, 1000,
+            key_hash,
+            engram_id,
+            expires_ts,
+            1000,
         )
 
     return {
@@ -459,7 +475,11 @@ async def _tool_commit(
     fact_id = str(uuid.uuid4())
     lineage_id = corrects_lineage or str(uuid.uuid4())
     content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
-    ttl_ts = datetime.fromtimestamp(time.time() + ttl_days * 86400, tz=timezone.utc) if ttl_days else None
+    ttl_ts = (
+        datetime.fromtimestamp(time.time() + ttl_days * 86400, tz=timezone.utc)
+        if ttl_days
+        else None
+    )
     supersedes_id: str | None = None
 
     # ── Quota check ──────────────────────────────────────────────────
@@ -482,7 +502,9 @@ async def _tool_commit(
         if operation == "delete":
             await conn.execute(
                 "UPDATE facts SET valid_until = $1 WHERE workspace_id = $2 AND scope = $3 AND valid_until IS NULL",
-                now, workspace_id, scope,
+                now,
+                workspace_id,
+                scope,
             )
             return {"status": "deleted", "scope": scope}
 
@@ -491,7 +513,8 @@ async def _tool_commit(
                 """SELECT id, lineage_id FROM facts
                    WHERE workspace_id = $1 AND scope = $2 AND valid_until IS NULL
                    ORDER BY committed_at DESC LIMIT 1""",
-                workspace_id, scope,
+                workspace_id,
+                scope,
             )
             if row:
                 supersedes_id = row["id"]
@@ -506,22 +529,35 @@ async def _tool_commit(
                 agent_id, committed_at, valid_from, valid_until, memory_op,
                 supersedes_fact_id, workspace_id, durability)
                VALUES ($1,$2,$3,$4,$5,$6,$7,'agent',$8,$8,$9,$10,$11,$12,$13)""",
-            fact_id, lineage_id, content, content_hash, scope, confidence, fact_type,
-            now, ttl_ts, operation, supersedes_id, workspace_id, durability,
+            fact_id,
+            lineage_id,
+            content,
+            content_hash,
+            scope,
+            confidence,
+            fact_type,
+            now,
+            ttl_ts,
+            operation,
+            supersedes_id,
+            workspace_id,
+            durability,
         )
         await conn.execute(
             """INSERT INTO agents (agent_id, workspace_id, last_seen, total_commits)
                VALUES ('agent', $1, $2, 1)
                ON CONFLICT (agent_id, workspace_id)
                DO UPDATE SET last_seen = $2, total_commits = agents.total_commits + 1""",
-            workspace_id, now,
+            workspace_id,
+            now,
         )
         # Track storage usage
         if operation != "delete":
             content_bytes = len(content.encode())
             await conn.execute(
                 "UPDATE workspaces SET storage_bytes = storage_bytes + $1 WHERE engram_id = $2",
-                content_bytes, workspace_id,
+                content_bytes,
+                workspace_id,
             )
             # Auto-pause if hobby limit exceeded and no payment method
             updated_ws = await conn.fetchrow(
@@ -603,9 +639,7 @@ async def _tool_conflicts(
         args: list[Any] = [workspace_id, status]
         idx = 3
         if scope:
-            conds.append(
-                f"(fa.scope = ${idx} OR fb.scope = ${idx})"
-            )
+            conds.append(f"(fa.scope = ${idx} OR fb.scope = ${idx})")
             args.append(scope)
             idx += 1
 
@@ -644,7 +678,8 @@ async def _tool_resolve(
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT id FROM conflicts WHERE id = $1 AND workspace_id = $2",
-            conflict_id, workspace_id,
+            conflict_id,
+            workspace_id,
         )
         if not row:
             return {"status": "error", "message": "Conflict not found"}
@@ -652,7 +687,10 @@ async def _tool_resolve(
             """UPDATE conflicts
                SET status = 'resolved', resolved_at = $1, resolution = $2, resolution_type = $3
                WHERE id = $4""",
-            now, resolution, resolution_type, conflict_id,
+            now,
+            resolution,
+            resolution_type,
+            conflict_id,
         )
         if resolution_type == "winner" and winning_claim_id:
             # Retire the losing fact
@@ -665,9 +703,7 @@ async def _tool_resolve(
                     if winning_claim_id == losing["fact_a_id"]
                     else losing["fact_a_id"]
                 )
-                await conn.execute(
-                    "UPDATE facts SET valid_until = $1 WHERE id = $2", now, loser
-                )
+                await conn.execute("UPDATE facts SET valid_until = $1 WHERE id = $2", now, loser)
 
     return {"status": "resolved", "conflict_id": conflict_id, "resolution_type": resolution_type}
 
@@ -683,7 +719,8 @@ async def _tool_reset_invite_key(workspace_id: str, pool: Any) -> dict:
         new_gen = ws["key_generation"] + 1
         await conn.execute(
             "UPDATE workspaces SET key_generation = $1 WHERE engram_id = $2",
-            new_gen, workspace_id,
+            new_gen,
+            workspace_id,
         )
         # Expire all existing invite keys
         await conn.execute(
@@ -698,7 +735,10 @@ async def _tool_reset_invite_key(workspace_id: str, pool: Any) -> dict:
         await conn.execute(
             """INSERT INTO invite_keys (key_hash, engram_id, expires_at, uses_remaining)
                VALUES ($1, $2, $3, $4)""",
-            new_hash, workspace_id, expires_ts, 1000,
+            new_hash,
+            workspace_id,
+            expires_ts,
+            1000,
         )
 
     return {
@@ -873,6 +913,7 @@ _SERVER_INFO = {
 
 # ── MCP request router ───────────────────────────────────────────────
 
+
 def _ok(id: Any, result: Any) -> dict:
     return {"jsonrpc": "2.0", "id": id, "result": result}
 
@@ -886,7 +927,6 @@ async def _handle_message(msg: dict, workspace_id: str | None) -> dict | None:
     method = msg.get("method", "")
     params = msg.get("params") or {}
     msg_id = msg.get("id")
-    is_notification = msg_id is None
 
     try:
         if method == "initialize":
@@ -933,7 +973,8 @@ async def _handle_message(msg: dict, workspace_id: str | None) -> dict | None:
                     }
                 elif tool_name == "engram_commit":
                     result = await _tool_commit(
-                        workspace_id, pool,
+                        workspace_id,
+                        pool,
                         content=args["content"],
                         scope=args.get("scope", "general"),
                         confidence=float(args.get("confidence", 0.8)),
@@ -945,7 +986,8 @@ async def _handle_message(msg: dict, workspace_id: str | None) -> dict | None:
                     )
                 elif tool_name == "engram_query":
                     result = await _tool_query(
-                        workspace_id, pool,
+                        workspace_id,
+                        pool,
                         topic=args["topic"],
                         scope=args.get("scope"),
                         fact_type=args.get("fact_type"),
@@ -953,13 +995,15 @@ async def _handle_message(msg: dict, workspace_id: str | None) -> dict | None:
                     )
                 elif tool_name == "engram_conflicts":
                     result = await _tool_conflicts(
-                        workspace_id, pool,
+                        workspace_id,
+                        pool,
                         scope=args.get("scope"),
                         status=args.get("status", "open"),
                     )
                 elif tool_name == "engram_resolve":
                     result = await _tool_resolve(
-                        workspace_id, pool,
+                        workspace_id,
+                        pool,
                         conflict_id=args["conflict_id"],
                         resolution_type=args["resolution_type"],
                         resolution=args["resolution"],
@@ -984,15 +1028,14 @@ async def _handle_message(msg: dict, workspace_id: str | None) -> dict | None:
 
 # ── Starlette request handler ────────────────────────────────────────
 
+
 async def handle_mcp(request: Request) -> Response:
     workspace_id = await _auth_workspace(request)
 
     try:
         body = await request.json()
     except Exception:
-        return JSONResponse(
-            _err(None, -32700, "Parse error"), status_code=400
-        )
+        return JSONResponse(_err(None, -32700, "Parse error"), status_code=400)
 
     # Support both single message and batch
     if isinstance(body, list):

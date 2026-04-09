@@ -6,7 +6,6 @@ Regex pass only for v0.1 (NER model is a future addition).
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -38,10 +37,33 @@ _VERSION_PATTERN = re.compile(r"\bv?(?P<value>\d+\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9.]
 
 # Technology names (common ones)
 _TECH_NAMES = {
-    "postgresql", "postgres", "mysql", "sqlite", "mongodb", "redis",
-    "elasticsearch", "kafka", "rabbitmq", "nginx", "docker", "kubernetes",
-    "k8s", "graphql", "grpc", "rest", "jwt", "oauth", "s3", "sqs", "sns",
-    "dynamodb", "cloudfront", "lambda", "ecs", "eks", "rds",
+    "postgresql",
+    "postgres",
+    "mysql",
+    "sqlite",
+    "mongodb",
+    "redis",
+    "elasticsearch",
+    "kafka",
+    "rabbitmq",
+    "nginx",
+    "docker",
+    "kubernetes",
+    "k8s",
+    "graphql",
+    "grpc",
+    "rest",
+    "jwt",
+    "oauth",
+    "s3",
+    "sqs",
+    "sns",
+    "dynamodb",
+    "cloudfront",
+    "lambda",
+    "ecs",
+    "eks",
+    "rds",
 }
 
 
@@ -121,10 +143,36 @@ def extract_keywords(content: str) -> list[str]:
     # Remove common stop words and extract meaningful terms
     words = re.findall(r"\b[a-zA-Z_][a-zA-Z0-9_-]{2,}\b", content)
     stop = {
-        "the", "and", "for", "not", "but", "all", "has", "was", "are", "this",
-        "that", "with", "from", "will", "been", "have", "does", "when", "which",
-        "their", "about", "into", "than", "them", "then", "each", "other",
-        "using", "used", "uses",
+        "the",
+        "and",
+        "for",
+        "not",
+        "but",
+        "all",
+        "has",
+        "was",
+        "are",
+        "this",
+        "that",
+        "with",
+        "from",
+        "will",
+        "been",
+        "have",
+        "does",
+        "when",
+        "which",
+        "their",
+        "about",
+        "into",
+        "than",
+        "them",
+        "then",
+        "each",
+        "other",
+        "using",
+        "used",
+        "uses",
     }
     seen: set[str] = set()
     keywords: list[str] = []

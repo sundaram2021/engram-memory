@@ -55,7 +55,7 @@ def test_config_set_updates_anonymous_mode(monkeypatch, tmp_path):
     result = runner.invoke(main, ["config", "set", "anonymous_mode", "true"])
 
     assert result.exit_code == 0
-    assert 'Updated anonymous_mode=true' in result.output
+    assert "Updated anonymous_mode=true" in result.output
 
     data = json.loads((tmp_path / "workspace.json").read_text())
     assert data["anonymous_mode"] is True
@@ -75,7 +75,7 @@ def test_config_set_updates_anon_agents(monkeypatch, tmp_path):
     result = runner.invoke(main, ["config", "set", "anon_agents", "false"])
 
     assert result.exit_code == 0
-    assert 'Updated anon_agents=false' in result.output
+    assert "Updated anon_agents=false" in result.output
 
     data = json.loads((tmp_path / "workspace.json").read_text())
     assert data["anon_agents"] is False
