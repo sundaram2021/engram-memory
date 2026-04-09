@@ -7,7 +7,6 @@ rather than propagating the request to the engine and returning a 500.
 from __future__ import annotations
 
 import asyncio
-import json
 from unittest.mock import AsyncMock, MagicMock
 
 from starlette.testclient import TestClient
