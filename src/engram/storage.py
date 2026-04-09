@@ -269,6 +269,10 @@ class BaseStorage(ABC):
         """Increment key_generation and return the new value. Default no-op."""
         return 0
 
+    async def get_invite_keys(self) -> list[dict]:
+        """Return list of active invite keys. Default empty list."""
+        return []
+
     async def revoke_all_invite_keys(self, engram_id: str) -> None:
         """Delete all invite keys for a workspace. Default no-op."""
 
@@ -1113,6 +1117,15 @@ class SQLiteStorage(BaseStorage):
     async def revoke_all_invite_keys(self, engram_id: str) -> None:
         await self.db.execute("DELETE FROM invite_keys WHERE engram_id = ?", (engram_id,))
         await self.db.commit()
+
+    async def get_invite_keys(self) -> list[dict]:
+        """Return list of active invite keys."""
+        cursor = await self.db.execute(
+            "SELECT * FROM invite_keys WHERE engram_id = ? ORDER BY created_at DESC",
+            (self.workspace_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
 
 
 def _now_iso() -> str:
