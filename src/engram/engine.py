@@ -540,23 +540,6 @@ class EngramEngine:
                     "adjacent": False,
                 }
             )
-            results.append(
-                {
-                    "fact_id": fact["id"],
-                    "content": fact["content"],
-                    "scope": fact["scope"],
-                    "confidence": fact["confidence"],
-                    "fact_type": fact["fact_type"],
-                    "agent_id": fact["agent_id"],
-                    "committed_at": fact["committed_at"],
-                    "has_open_conflict": fact["id"] in open_conflict_ids,
-                    "verified": fact.get("provenance") is not None,
-                    "provenance": fact.get("provenance"),
-                    "corroborating_agents": fact.get("corroborating_agents", 0),
-                    "relevance_score": round(score, 4),
-                    "durability": fact.get("durability", "durable"),
-                }
-            )
 
         # Surface related facts from adjacent (sibling/parent) scopes
         if include_adjacent and scope:

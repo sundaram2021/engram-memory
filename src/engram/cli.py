@@ -735,7 +735,8 @@ def config_set(key: str, value: str) -> None:
         raise click.ClickException(str(e))
 
     click.echo(f"Updated {key}={json.dumps(parsed_value)}")
-    
+
+
 # ── engram search ────────────────────────────────────────────────────
 
 
@@ -843,8 +844,6 @@ def search(topic: str, scope: str | None, limit: int, as_json: bool) -> None:
         raise click.ClickException(str(exc))
 
     click.echo(output)
-    
-        
 
 
 # ── engram verify ────────────────────────────────────────────────────

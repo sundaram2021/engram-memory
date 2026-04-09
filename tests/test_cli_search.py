@@ -54,7 +54,10 @@ def test_search_prints_formatted_results(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert 'Results for "payments service" (1):' in result.output
-    assert "[payments] Payments service retries failed webhooks with exponential backoff." in result.output
+    assert (
+        "[payments] Payments service retries failed webhooks with exponential backoff."
+        in result.output
+    )
     assert "provenance=src/payments/service.py:42" in result.output
     assert "Auth service signs session tokens" not in result.output
 
@@ -75,7 +78,9 @@ def test_search_json_outputs_results(monkeypatch, tmp_path):
     data = json.loads(result.output)
     assert len(data) == 1
     assert data[0]["scope"] == "payments"
-    assert data[0]["content"] == "Payments service retries failed webhooks with exponential backoff."
+    assert (
+        data[0]["content"] == "Payments service retries failed webhooks with exponential backoff."
+    )
     assert data[0]["verified"] is True
 
 
