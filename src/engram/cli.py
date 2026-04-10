@@ -22,11 +22,12 @@ import click
 from engram import embeddings
 from engram.storage import DEFAULT_DB_PATH
 
-_DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
+_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 _PATH_SYSTEM_HOME = Path.home()
 _PATH_APPDATA_DIR = Path(os.environ["APPDATA"]) if "APPDATA" in os.environ else None
 _PATH_APPSUPPORT_DIR = _PATH_SYSTEM_HOME / "Library" / "Application Support"  # Mac only
 _PATH_XDG_DIR = Path(os.environ["XDG_CONFIG_HOME"]) if "XDG_CONFIG_HOME" in os.environ else None
+
 
 @click.group()
 def main() -> None:
@@ -40,30 +41,22 @@ def main() -> None:
 # config file (different systems have them in different places).
 
 _AGENT_CLIENTS = {}
-with open(os.path.join(_DATA_DIR, 'cli-agent-clients.json'), 'r') as file:
+with open(os.path.join(_DATA_DIR, "cli-agent-clients.json"), "r") as file:
     agent_clients_json = json.load(file)
     for key in agent_clients_json.keys():
         _AGENT_CLIENTS[key] = {}
-        agent_config_path = agent_clients_json[key]['path']
-        if agent_clients_json[key]['config_path']['appdata'] and _PATH_APPDATA_DIR:
-            _AGENT_CLIENTS[key]['path'] = Path(
-                _PATH_APPDATA_DIR / agent_config_path
-            )
-        elif agent_clients_json[key]['config_path']['appsupport'] and _PATH_APPSUPPORT_DIR:
-            _AGENT_CLIENTS[key]['path'] = Path(
-                _PATH_APPSUPPORT_DIR / agent_config_path
-            )
-        elif agent_clients_json[key]['config_path']['xdg'] and _PATH_XDG_DIR:
-            _AGENT_CLIENTS[key]['path'] = Path(
-                _PATH_XDG_DIR / agent_config_path
-            )
-        elif agent_clients_json[key]['config_path']['syshome']:
-            _AGENT_CLIENTS[key]['path'] = Path(
-                _PATH_SYSTEM_HOME / agent_config_path
-            )
-        if 'path' not in _AGENT_CLIENTS[key]:
-            _AGENT_CLIENTS[key]['path'] = Path("ValidPathNotFound")
-        _AGENT_CLIENTS[key]['key'] = agent_clients_json[key]['server_type_key']
+        agent_config_path = agent_clients_json[key]["path"]
+        if agent_clients_json[key]["config_path"]["appdata"] and _PATH_APPDATA_DIR:
+            _AGENT_CLIENTS[key]["path"] = Path(_PATH_APPDATA_DIR / agent_config_path)
+        elif agent_clients_json[key]["config_path"]["appsupport"] and _PATH_APPSUPPORT_DIR:
+            _AGENT_CLIENTS[key]["path"] = Path(_PATH_APPSUPPORT_DIR / agent_config_path)
+        elif agent_clients_json[key]["config_path"]["xdg"] and _PATH_XDG_DIR:
+            _AGENT_CLIENTS[key]["path"] = Path(_PATH_XDG_DIR / agent_config_path)
+        elif agent_clients_json[key]["config_path"]["syshome"]:
+            _AGENT_CLIENTS[key]["path"] = Path(_PATH_SYSTEM_HOME / agent_config_path)
+        if "path" not in _AGENT_CLIENTS[key]:
+            _AGENT_CLIENTS[key]["path"] = Path("ValidPathNotFound")
+        _AGENT_CLIENTS[key]["key"] = agent_clients_json[key]["server_type_key"]
 
 _ENGRAM_MCP_ENTRY = {
     "command": "uvx",
