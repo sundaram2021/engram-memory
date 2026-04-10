@@ -20,9 +20,12 @@ cd Engram
 # or: pip install -e ".[dev]"
 
 # 3. Run the MCP server locally
-python -m engram
+python -m engram.cli serve --http
 
-# 4. Ask your agent (Claude Code, Cursor, etc.) to set up Engram
+# 4. Open the local dashboard
+# http://127.0.0.1:7474/dashboard
+
+# 5. Ask your agent (Claude Code, Cursor, etc.) to set up Engram
 # Your agent will call engram_init and you'll see it working.
 
 # 5. Make a change → open a PR

@@ -52,6 +52,25 @@ Your agent handles the rest.
 
 ---
 
+## Running Locally
+
+If you want to run Engram from this repository during development:
+
+```powershell
+pip install -e ".[dev]"
+python -m engram.cli serve --http
+```
+
+Then open:
+
+```text
+http://127.0.0.1:7474/dashboard
+```
+
+If `engram` is not on your `PATH`, `python -m engram.cli ...` works reliably.
+
+---
+
 ## Setup Flow
 
 ### Creating a Workspace

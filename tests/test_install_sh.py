@@ -55,15 +55,7 @@ def test_install_sh_merges_with_existing_cursor_config(tmp_path):
 
     config_path = cursor_dir / "mcp.json"
     config_path.write_text(
-        json.dumps(
-            {
-                "mcpServers": {
-                    "other": {
-                        "url": "https://example.com/mcp"
-                    }
-                }
-            }
-        )
+        json.dumps({"mcpServers": {"other": {"url": "https://example.com/mcp"}}})
     )
 
     result = run_install(tmp_path)
@@ -85,10 +77,7 @@ def test_install_sh_adds_invite_key_header(tmp_path):
     config_path = tmp_path / ".cursor" / "mcp.json"
     config = json.loads(config_path.read_text())
 
-    assert (
-        config["mcpServers"]["engram"]["headers"]["Authorization"]
-        == "Bearer ek_live_test123"
-    )
+    assert config["mcpServers"]["engram"]["headers"]["Authorization"] == "Bearer ek_live_test123"
 
 
 def test_install_sh_handles_empty_existing_json_file(tmp_path):

@@ -8,7 +8,6 @@ The Storage alias keeps existing imports working.
 
 from __future__ import annotations
 
-import json
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,7 +60,22 @@ class BaseStorage(ABC):
     async def get_facts_by_rowids(self, rowids: list[int]) -> list[dict]: ...
 
     @abstractmethod
+    async def get_distinct_scopes(self) -> list[str]:
+        """Return all unique scope values for the workspace."""
+        ...
+
+    @abstractmethod
     async def get_fact_by_id(self, fact_id: str) -> dict | None: ...
+
+    @abstractmethod
+    async def get_facts_by_ids(self, ids: list[str]) -> dict[str, dict]:
+        """Batch-fetch multiple facts by ID. Returns {id: fact_row}."""
+        ...
+
+    @abstractmethod
+    async def get_conflicting_fact_ids(self, fact_id: str) -> set[str]:
+        """Return all fact IDs that already have any conflict with fact_id."""
+        ...
 
     @abstractmethod
     async def promote_fact(self, fact_id: str) -> bool:
@@ -213,6 +227,14 @@ class BaseStorage(ABC):
     @abstractmethod
     async def count_conflicts(self, status: str = "open") -> int: ...
 
+    async def get_workspace_stats(self) -> dict:
+        """Return aggregate workspace statistics for the /api/stats endpoint.
+
+        Default no-op implementation for backends that haven't implemented it yet.
+        SQLiteStorage provides a full implementation.
+        """
+        return {}
+
     @abstractmethod
     async def get_agents(self) -> list[dict]: ...
 
@@ -258,8 +280,9 @@ class BaseStorage(ABC):
         """Return invite key row if valid (not expired, uses remaining). Default None."""
         return None
 
-    async def consume_invite_key(self, key_hash: str) -> None:
-        """Decrement uses_remaining. Default no-op for local mode."""
+    async def consume_invite_key(self, key_hash: str) -> dict | None:
+        """Atomically validate and decrement uses_remaining. Returns the key row if consumed, None if exhausted/expired."""
+        return None
 
     async def get_key_generation(self, engram_id: str) -> int:
         """Return the current key_generation for a workspace. Default 0."""
@@ -276,12 +299,82 @@ class BaseStorage(ABC):
     async def revoke_all_invite_keys(self, engram_id: str) -> None:
         """Delete all invite keys for a workspace. Default no-op."""
 
+    # ── Webhook methods ───────────────────────────────────────────────
+
+    @abstractmethod
+    async def insert_webhook(self, webhook: dict[str, Any]) -> None: ...
+
+    @abstractmethod
+    async def get_webhooks(self) -> list[dict]: ...
+
+    @abstractmethod
+    async def get_webhook_by_id(self, webhook_id: str) -> dict | None: ...
+
+    @abstractmethod
+    async def delete_webhook(self, webhook_id: str) -> bool: ...
+
+    @abstractmethod
+    async def queue_webhook_delivery(self, delivery: dict[str, Any]) -> None: ...
+
+    @abstractmethod
+    async def get_pending_deliveries(self) -> list[dict]: ...
+
+    @abstractmethod
+    async def mark_delivery_done(self, delivery_id: str) -> None: ...
+
+    @abstractmethod
+    async def mark_delivery_failed(self, delivery_id: str) -> None: ...
+
+    # ── Resolution rule methods ───────────────────────────────────────
+
+    @abstractmethod
+    async def insert_rule(self, rule: dict[str, Any]) -> None: ...
+
+    @abstractmethod
+    async def get_rules(self) -> list[dict]: ...
+
+    @abstractmethod
+    async def get_rule_by_id(self, rule_id: str) -> dict | None: ...
+
+    @abstractmethod
+    async def delete_rule(self, rule_id: str) -> bool: ...
+
+    # ── Scope registry methods ────────────────────────────────────────
+
+    @abstractmethod
+    async def upsert_scope(self, scope_data: dict[str, Any]) -> None: ...
+
+    @abstractmethod
+    async def get_scopes(self) -> list[dict]: ...
+
+    @abstractmethod
+    async def get_scope_by_name(self, scope: str) -> dict | None: ...
+
+    @abstractmethod
+    async def get_scope_analytics(self, scope: str) -> dict: ...
+
+    # ── Audit log methods ─────────────────────────────────────────────
+
+    @abstractmethod
+    async def insert_audit_entry(self, entry: dict[str, Any]) -> None: ...
+
+    @abstractmethod
+    async def get_audit_log(
+        self,
+        agent_id: str | None = None,
+        operation: str | None = None,
+        from_ts: str | None = None,
+        to_ts: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]: ...
+
 
 class SQLiteStorage(BaseStorage):
     """Async SQLite storage with WAL mode and FTS5."""
 
-    def __init__(self, db_path: Path | str = DEFAULT_DB_PATH) -> None:
+    def __init__(self, db_path: Path | str = DEFAULT_DB_PATH, workspace_id: str = "local") -> None:
         self.db_path = Path(db_path)
+        self.workspace_id = workspace_id
         self._db: aiosqlite.Connection | None = None
 
     async def connect(self) -> None:
@@ -368,8 +461,32 @@ class SQLiteStorage(BaseStorage):
             "memory_op",
             "supersedes_fact_id",
             "durability",
+            "id",
+            "lineage_id",
+            "content",
+            "content_hash",
+            "scope",
+            "confidence",
+            "fact_type",
+            "agent_id",
+            "engineer",
+            "provenance",
+            "keywords",
+            "entities",
+            "artifact_hash",
+            "embedding",
+            "embedding_model",
+            "embedding_ver",
+            "committed_at",
+            "valid_from",
+            "valid_until",
+            "ttl_days",
+            "memory_op",
+            "supersedes_fact_id",
+            "workspace_id",
+            "durability",
         ]
-        defaults = {"memory_op": "add", "durability": "durable"}
+        defaults = {"memory_op": "add", "durability": "durable", "workspace_id": self.workspace_id}
         placeholders = ", ".join(["?"] * len(cols))
         col_names = ", ".join(cols)
         values = [fact.get(c, defaults.get(c)) for c in cols]
@@ -380,10 +497,10 @@ class SQLiteStorage(BaseStorage):
         return cursor.lastrowid  # type: ignore[return-value]
 
     async def find_duplicate(self, content_hash: str, scope: str) -> str | None:
-        """Check for exact content duplicate in the same scope (current facts only)."""
+        """Check for exact content duplicate in the same scope and workspace (current facts only)."""
         cursor = await self.db.execute(
-            "SELECT id FROM facts WHERE content_hash = ? AND scope = ? AND valid_until IS NULL",
-            (content_hash, scope),
+            "SELECT id FROM facts WHERE content_hash = ? AND scope = ? AND valid_until IS NULL AND workspace_id = ?",
+            (content_hash, scope, self.workspace_id),
         )
         row = await cursor.fetchone()
         return row["id"] if row else None
@@ -395,25 +512,26 @@ class SQLiteStorage(BaseStorage):
         now = _now_iso()
         if lineage_id:
             await self.db.execute(
-                "UPDATE facts SET valid_until = ? WHERE lineage_id = ? AND valid_until IS NULL",
-                (now, lineage_id),
+                "UPDATE facts SET valid_until = ? WHERE lineage_id = ? AND valid_until IS NULL AND workspace_id = ?",
+                (now, lineage_id, self.workspace_id),
             )
         elif fact_id:
             await self.db.execute(
-                "UPDATE facts SET valid_until = ? WHERE id = ? AND valid_until IS NULL",
-                (now, fact_id),
+                "UPDATE facts SET valid_until = ? WHERE id = ? AND valid_until IS NULL AND workspace_id = ?",
+                (now, fact_id, self.workspace_id),
             )
         await self.db.commit()
 
     async def expire_ttl_facts(self) -> int:
-        """Close validity windows for TTL-expired facts. Returns count."""
+        """Close validity windows for TTL-expired facts in this workspace. Returns count."""
         now = _now_iso()
         cursor = await self.db.execute(
             """UPDATE facts SET valid_until = ?
                WHERE ttl_days IS NOT NULL
                  AND valid_until IS NULL
+                 AND workspace_id = ?
                  AND datetime(valid_from, '+' || ttl_days || ' days') < ?""",
-            (now, now),
+            (now, self.workspace_id, now),
         )
         await self.db.commit()
         return cursor.rowcount
@@ -429,8 +547,8 @@ class SQLiteStorage(BaseStorage):
         include_ephemeral: bool = False,
     ) -> list[dict]:
         """Retrieve currently valid facts, optionally filtered."""
-        conditions = []
-        params: list[Any] = []
+        conditions = ["workspace_id = ?"]
+        params: list[Any] = [self.workspace_id]
 
         if as_of:
             conditions.append("valid_from <= ?")
@@ -451,7 +569,7 @@ class SQLiteStorage(BaseStorage):
         if not include_ephemeral:
             conditions.append("durability = 'durable'")
 
-        where = " AND ".join(conditions) if conditions else "1=1"
+        where = " AND ".join(conditions)
         params.append(limit)
 
         cursor = await self.db.execute(
@@ -475,15 +593,52 @@ class SQLiteStorage(BaseStorage):
             return []
         placeholders = ",".join(["?"] * len(rowids))
         cursor = await self.db.execute(
-            f"SELECT * FROM facts WHERE rowid IN ({placeholders})", rowids
+            f"SELECT * FROM facts WHERE rowid IN ({placeholders}) AND workspace_id = ?",
+            [*rowids, self.workspace_id],
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+    async def get_distinct_scopes(self) -> list[str]:
+        """Return all unique scope values for the workspace."""
+        cursor = await self.db.execute(
+            "SELECT DISTINCT scope FROM facts WHERE workspace_id = ? AND valid_until IS NULL",
+            (self.workspace_id,),
+        )
+        rows = await cursor.fetchall()
+        return [r["scope"] for r in rows]
 
     async def get_fact_by_id(self, fact_id: str) -> dict | None:
         cursor = await self.db.execute("SELECT * FROM facts WHERE id = ?", (fact_id,))
         row = await cursor.fetchone()
         return dict(row) if row else None
+
+    async def get_facts_by_ids(self, ids: list[str]) -> dict[str, dict]:
+        """Batch-fetch multiple facts by ID in a single query. Returns {id: fact_row}."""
+        if not ids:
+            return {}
+        placeholders = ",".join("?" * len(ids))
+        cursor = await self.db.execute(
+            f"SELECT * FROM facts WHERE id IN ({placeholders}) AND workspace_id = ?",
+            (*ids, self.workspace_id),
+        )
+        rows = await cursor.fetchall()
+        return {row["id"]: dict(row) for row in rows}
+
+    async def get_conflicting_fact_ids(self, fact_id: str) -> set[str]:
+        """Return all fact IDs that already have any conflict (any status) with fact_id."""
+        cursor = await self.db.execute(
+            """SELECT fact_a_id, fact_b_id FROM conflicts
+               WHERE workspace_id = ?
+                 AND (fact_a_id = ? OR fact_b_id = ?)""",
+            (self.workspace_id, fact_id, fact_id),
+        )
+        rows = await cursor.fetchall()
+        result: set[str] = set()
+        for r in rows:
+            other = r["fact_b_id"] if r["fact_a_id"] == fact_id else r["fact_a_id"]
+            result.add(other)
+        return result
 
     async def promote_fact(self, fact_id: str) -> bool:
         """Promote an ephemeral fact to durable. Returns True if promoted."""
@@ -506,11 +661,11 @@ class SQLiteStorage(BaseStorage):
         await self.db.commit()
 
     async def get_promotable_ephemeral_facts(self, min_hits: int = 2) -> list[dict]:
-        """Return ephemeral facts that have been queried enough times to auto-promote."""
+        """Return ephemeral facts in this workspace that have been queried enough times to auto-promote."""
         cursor = await self.db.execute(
             "SELECT * FROM facts WHERE durability = 'ephemeral' AND valid_until IS NULL "
-            "AND query_hits >= ?",
-            (min_hits,),
+            "AND workspace_id = ? AND query_hits >= ?",
+            (self.workspace_id, min_hits),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
@@ -524,11 +679,12 @@ class SQLiteStorage(BaseStorage):
         cursor = await self.db.execute(
             """UPDATE facts SET valid_until = ?
                WHERE valid_until IS NULL
+                 AND workspace_id = ?
                  AND fact_type = 'inference'
                  AND provenance IS NULL
                  AND corroborating_agents = 0
                  AND datetime(committed_at, '+30 days') < ?""",
-            (now, now),
+            (now, self.workspace_id, now),
         )
         total += cursor.rowcount
         await self.db.commit()
@@ -537,11 +693,12 @@ class SQLiteStorage(BaseStorage):
         cursor = await self.db.execute(
             """UPDATE facts SET valid_until = ?
                WHERE valid_until IS NULL
+                 AND workspace_id = ?
                  AND fact_type = 'observation'
                  AND provenance IS NULL
                  AND corroborating_agents = 0
                  AND datetime(committed_at, '+90 days') < ?""",
-            (now, now),
+            (now, self.workspace_id, now),
         )
         total += cursor.rowcount
         await self.db.commit()
@@ -557,13 +714,14 @@ class SQLiteStorage(BaseStorage):
         cursor = await self.db.execute(
             """SELECT f.* FROM facts f, json_each(f.entities) e
                WHERE f.valid_until IS NULL
+                 AND f.workspace_id = ?
                  AND f.id != ?
                  AND f.scope = ?
                  AND json_extract(e.value, '$.name') = ?
                  AND json_extract(e.value, '$.type') = ?
                  AND json_extract(e.value, '$.value') IS NOT NULL
                  AND CAST(json_extract(e.value, '$.value') AS TEXT) != ?""",
-            (exclude_id, scope, entity_name, entity_type, str(entity_value)),
+            (self.workspace_id, exclude_id, scope, entity_name, entity_type, str(entity_value)),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
@@ -575,12 +733,13 @@ class SQLiteStorage(BaseStorage):
         cursor = await self.db.execute(
             """SELECT f.* FROM facts f, json_each(f.entities) e
                WHERE f.valid_until IS NULL
+                 AND f.workspace_id = ?
                  AND f.id != ?
                  AND json_extract(e.value, '$.name') = ?
                  AND json_extract(e.value, '$.type') = ?
                  AND (json_extract(e.value, '$.value') IS NULL
                       OR CAST(json_extract(e.value, '$.value') AS TEXT) != ?)""",
-            (exclude_id, entity_name, entity_type, str(entity_value)),
+            (self.workspace_id, exclude_id, entity_name, entity_type, str(entity_value)),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
@@ -598,28 +757,31 @@ class SQLiteStorage(BaseStorage):
             "explanation",
             "severity",
             "status",
+            "workspace_id",
         ]
         placeholders = ", ".join(["?"] * len(cols))
         col_names = ", ".join(cols)
-        values = [conflict.get(c) for c in cols]
+        defaults = {"workspace_id": self.workspace_id}
+        values = [conflict.get(c, defaults.get(c)) for c in cols]
         await self.db.execute(
             f"INSERT INTO conflicts ({col_names}) VALUES ({placeholders})", values
         )
         await self.db.commit()
 
     async def conflict_exists(self, fact_a_id: str, fact_b_id: str) -> bool:
-        """Check if a conflict already exists between two facts (in either order)."""
+        """Check if a conflict already exists between two facts (in either order) within this workspace."""
         cursor = await self.db.execute(
             """SELECT 1 FROM conflicts
-               WHERE (fact_a_id = ? AND fact_b_id = ?)
-                  OR (fact_a_id = ? AND fact_b_id = ?)""",
-            (fact_a_id, fact_b_id, fact_b_id, fact_a_id),
+               WHERE workspace_id = ?
+                 AND ((fact_a_id = ? AND fact_b_id = ?)
+                  OR  (fact_a_id = ? AND fact_b_id = ?))""",
+            (self.workspace_id, fact_a_id, fact_b_id, fact_b_id, fact_a_id),
         )
         return await cursor.fetchone() is not None
 
     async def get_conflicts(self, scope: str | None = None, status: str = "open") -> list[dict]:
-        conditions = []
-        params: list[Any] = []
+        conditions = ["c.workspace_id = ?"]
+        params: list[Any] = [self.workspace_id]
 
         if status != "all":
             conditions.append("c.status = ?")
@@ -631,7 +793,7 @@ class SQLiteStorage(BaseStorage):
             )
             params.extend([scope, scope, scope, scope])
 
-        where = " AND ".join(conditions) if conditions else "1=1"
+        where = " AND ".join(conditions)
 
         cursor = await self.db.execute(
             f"""SELECT c.*, fa.content as fact_a_content, fa.scope as fact_a_scope,
@@ -760,13 +922,17 @@ class SQLiteStorage(BaseStorage):
         return cursor.rowcount > 0
 
     async def get_stale_open_conflicts(self, older_than_hours: int = 72) -> list[dict]:
-        """Return open conflicts that have gone unreviewed past the escalation window."""
+        """Return open conflicts in this workspace that have gone unreviewed past the escalation window."""
         cursor = await self.db.execute(
             """SELECT * FROM conflicts
                WHERE status = 'open'
+                 AND workspace_id = ?
                  AND datetime(detected_at) < datetime('now', ? || ' hours')
                ORDER BY detected_at ASC""",
-            (f"-{older_than_hours}",),
+            (
+                self.workspace_id,
+                f"-{older_than_hours}",
+            ),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
@@ -849,24 +1015,25 @@ class SQLiteStorage(BaseStorage):
         await self.db.commit()
 
     async def get_facts_by_lineage(self, lineage_id: str) -> list[dict]:
-        """Return all facts with the given lineage_id, most recent first."""
+        """Return all facts with the given lineage_id in this workspace, most recent first."""
         cursor = await self.db.execute(
-            "SELECT * FROM facts WHERE lineage_id = ? ORDER BY committed_at DESC",
-            (lineage_id,),
+            "SELECT * FROM facts WHERE lineage_id = ? AND workspace_id = ? ORDER BY committed_at DESC",
+            (lineage_id, self.workspace_id),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
 
     async def get_active_facts_with_embeddings(self, scope: str, limit: int = 20) -> list[dict]:
-        """Return active facts in scope that have embeddings (for auto-update scoring)."""
+        """Return active facts in scope and workspace that have embeddings (for auto-update scoring)."""
         cursor = await self.db.execute(
             """SELECT * FROM facts
                WHERE scope = ?
+                 AND workspace_id = ?
                  AND valid_until IS NULL
                  AND embedding IS NOT NULL
                ORDER BY committed_at DESC
                LIMIT ?""",
-            (scope, limit),
+            (scope, self.workspace_id, limit),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
@@ -952,17 +1119,29 @@ class SQLiteStorage(BaseStorage):
     # ── Dashboard query helpers ──────────────────────────────────────
 
     async def count_facts(self, current_only: bool = True) -> int:
-        cond = "WHERE valid_until IS NULL" if current_only else ""
-        cursor = await self.db.execute(f"SELECT COUNT(*) as cnt FROM facts {cond}")
+        if current_only:
+            cursor = await self.db.execute(
+                "SELECT COUNT(*) as cnt FROM facts WHERE valid_until IS NULL AND workspace_id = ?",
+                (self.workspace_id,),
+            )
+        else:
+            cursor = await self.db.execute(
+                "SELECT COUNT(*) as cnt FROM facts WHERE workspace_id = ?",
+                (self.workspace_id,),
+            )
         row = await cursor.fetchone()
         return row["cnt"] if row else 0
 
     async def count_conflicts(self, status: str = "open") -> int:
         if status == "all":
-            cursor = await self.db.execute("SELECT COUNT(*) as cnt FROM conflicts")
+            cursor = await self.db.execute(
+                "SELECT COUNT(*) as cnt FROM conflicts WHERE workspace_id = ?",
+                (self.workspace_id,),
+            )
         else:
             cursor = await self.db.execute(
-                "SELECT COUNT(*) as cnt FROM conflicts WHERE status = ?", (status,)
+                "SELECT COUNT(*) as cnt FROM conflicts WHERE status = ? AND workspace_id = ?",
+                (status, self.workspace_id),
             )
         row = await cursor.fetchone()
         return row["cnt"] if row else 0
@@ -985,27 +1164,28 @@ class SQLiteStorage(BaseStorage):
         return {r["agent_id"]: dict(r) for r in rows}
 
     async def get_expiring_facts(self, days_ahead: int = 7) -> list[dict]:
-        """Get facts with TTL that will expire within days_ahead days."""
+        """Get facts with TTL in this workspace that will expire within days_ahead days."""
         cursor = await self.db.execute(
             """SELECT * FROM facts
                WHERE ttl_days IS NOT NULL
+                 AND workspace_id = ?
                  AND valid_until IS NOT NULL
                  AND valid_until > datetime('now')
                  AND valid_until < datetime('now', '+' || ? || ' days')
                ORDER BY valid_until ASC""",
-            (days_ahead,),
+            (self.workspace_id, days_ahead),
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
 
     async def get_fact_timeline(self, scope: str | None = None, limit: int = 100) -> list[dict]:
-        """Get facts ordered by valid_from for timeline view."""
-        conditions: list[str] = []
-        params: list[Any] = []
+        """Get facts in this workspace ordered by valid_from for timeline view."""
+        conditions: list[str] = ["workspace_id = ?"]
+        params: list[Any] = [self.workspace_id]
         if scope:
             conditions.append("(scope = ? OR scope LIKE ? || '/%')")
             params.extend([scope, scope])
-        where = " AND ".join(conditions) if conditions else "1=1"
+        where = " AND ".join(conditions)
         params.append(limit)
         cursor = await self.db.execute(
             f"""SELECT id, lineage_id, content, scope, confidence, fact_type,
@@ -1025,11 +1205,131 @@ class SQLiteStorage(BaseStorage):
         rows = await cursor.fetchall()
         return {r["feedback"]: r["cnt"] for r in rows}
 
+    # ── Workspace stats ───────────────────────────────────────────────
+
+    async def get_workspace_stats(self) -> dict:
+        """Return aggregate statistics for the current workspace.
+
+        Runs several focused queries and assembles a single stats dict used
+        by the /api/stats REST endpoint and the engram_stats MCP tool.
+        """
+        ws = self.workspace_id
+
+        # ── facts ──────────────────────────────────────────────────
+        cur = await self.db.execute(
+            "SELECT COUNT(*) as total, "
+            "SUM(CASE WHEN valid_until IS NULL THEN 1 ELSE 0 END) as current_count "
+            "FROM facts WHERE workspace_id = ?",
+            (ws,),
+        )
+        row = await cur.fetchone()
+        total_facts = row["total"] or 0
+        current_facts = row["current_count"] or 0
+
+        cur = await self.db.execute(
+            "SELECT scope, COUNT(*) as cnt FROM facts "
+            "WHERE valid_until IS NULL AND workspace_id = ? "
+            "GROUP BY scope ORDER BY cnt DESC LIMIT 10",
+            (ws,),
+        )
+        by_scope = {r["scope"]: r["cnt"] for r in await cur.fetchall()}
+
+        cur = await self.db.execute(
+            "SELECT fact_type, COUNT(*) as cnt FROM facts "
+            "WHERE valid_until IS NULL AND workspace_id = ? GROUP BY fact_type",
+            (ws,),
+        )
+        by_type = {r["fact_type"]: r["cnt"] for r in await cur.fetchall()}
+
+        cur = await self.db.execute(
+            "SELECT durability, COUNT(*) as cnt FROM facts "
+            "WHERE valid_until IS NULL AND workspace_id = ? GROUP BY durability",
+            (ws,),
+        )
+        by_durability = {r["durability"]: r["cnt"] for r in await cur.fetchall()}
+
+        cur = await self.db.execute(
+            "SELECT COUNT(*) as cnt FROM facts "
+            "WHERE ttl_days IS NOT NULL AND valid_until IS NULL AND workspace_id = ? "
+            "AND datetime(valid_from, '+' || ttl_days || ' days') < datetime('now', '+7 days')",
+            (ws,),
+        )
+        row = await cur.fetchone()
+        expiring_soon = row["cnt"] or 0
+
+        # ── conflicts ───────────────────────────────────────────────
+        cur = await self.db.execute(
+            "SELECT status, COUNT(*) as cnt FROM conflicts WHERE workspace_id = ? GROUP BY status",
+            (ws,),
+        )
+        conflict_by_status: dict[str, int] = {}
+        for r in await cur.fetchall():
+            conflict_by_status[r["status"]] = r["cnt"]
+
+        cur = await self.db.execute(
+            "SELECT detection_tier, COUNT(*) as cnt FROM conflicts "
+            "WHERE workspace_id = ? GROUP BY detection_tier",
+            (ws,),
+        )
+        conflict_by_tier = {r["detection_tier"]: r["cnt"] for r in await cur.fetchall()}
+
+        # ── agents ──────────────────────────────────────────────────
+        cur = await self.db.execute(
+            "SELECT agent_id, total_commits, flagged_commits FROM agents "
+            "WHERE workspace_id = ? ORDER BY total_commits DESC",
+            (ws,),
+        )
+        agent_rows = await cur.fetchall()
+        total_agents = len(agent_rows)
+        most_active = agent_rows[0]["agent_id"] if agent_rows else None
+        trust_scores = [
+            1.0 - (r["flagged_commits"] / r["total_commits"]) if r["total_commits"] > 0 else 0.8
+            for r in agent_rows
+        ]
+        avg_trust = round(sum(trust_scores) / len(trust_scores), 3) if trust_scores else None
+
+        # ── detection feedback ──────────────────────────────────────
+        cur = await self.db.execute(
+            "SELECT df.feedback, COUNT(*) as cnt FROM detection_feedback df "
+            "JOIN conflicts c ON df.conflict_id = c.id "
+            "WHERE c.workspace_id = ? GROUP BY df.feedback",
+            (ws,),
+        )
+        feedback = {r["feedback"]: r["cnt"] for r in await cur.fetchall()}
+
+        return {
+            "facts": {
+                "total": total_facts,
+                "current": current_facts,
+                "expiring_soon": expiring_soon,
+                "by_scope": by_scope,
+                "by_type": by_type,
+                "by_durability": by_durability,
+            },
+            "conflicts": {
+                "open": conflict_by_status.get("open", 0),
+                "resolved": conflict_by_status.get("resolved", 0),
+                "dismissed": conflict_by_status.get("dismissed", 0),
+                "total": sum(conflict_by_status.values()),
+                "by_tier": conflict_by_tier,
+            },
+            "agents": {
+                "total": total_agents,
+                "most_active": most_active,
+                "avg_trust_score": avg_trust,
+            },
+            "detection": {
+                "true_positives": feedback.get("true_positive", 0),
+                "false_positives": feedback.get("false_positive", 0),
+            },
+        }
+
     # ── Open conflict check for query enrichment ─────────────────────
 
     async def get_open_conflict_fact_ids(self) -> set[str]:
         cursor = await self.db.execute(
-            "SELECT fact_a_id, fact_b_id FROM conflicts WHERE status = 'open'"
+            "SELECT fact_a_id, fact_b_id FROM conflicts WHERE status = 'open' AND workspace_id = ?",
+            (self.workspace_id,),
         )
         rows = await cursor.fetchall()
         ids: set[str] = set()
@@ -1090,14 +1390,19 @@ class SQLiteStorage(BaseStorage):
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-    async def consume_invite_key(self, key_hash: str) -> None:
-        await self.db.execute(
+    async def consume_invite_key(self, key_hash: str) -> dict | None:
+        cursor = await self.db.execute(
             """UPDATE invite_keys
                SET uses_remaining = uses_remaining - 1
-               WHERE key_hash = ? AND uses_remaining IS NOT NULL""",
-            (key_hash,),
+               WHERE key_hash = ?
+                 AND (expires_at IS NULL OR expires_at > ?)
+                 AND (uses_remaining IS NULL OR uses_remaining > 0)
+               RETURNING *""",
+            (key_hash, _now_iso()),
         )
+        row = await cursor.fetchone()
         await self.db.commit()
+        return dict(row) if row else None
 
     async def get_key_generation(self, engram_id: str) -> int:
         cursor = await self.db.execute(
@@ -1122,7 +1427,284 @@ class SQLiteStorage(BaseStorage):
         """Return list of active invite keys."""
         cursor = await self.db.execute(
             "SELECT * FROM invite_keys WHERE engram_id = ? ORDER BY created_at DESC",
+            (self.engram_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    # ── Webhook methods ───────────────────────────────────────────────
+
+    async def insert_webhook(self, webhook: dict[str, Any]) -> None:
+        await self.db.execute(
+            """INSERT INTO webhooks(id, url, events, secret, active, created_at, workspace_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                webhook["id"],
+                webhook["url"],
+                webhook["events"],
+                webhook.get("secret"),
+                1,
+                webhook.get("created_at", _now_iso()),
+                self.workspace_id,
+            ),
+        )
+        await self.db.commit()
+
+    async def get_webhooks(self) -> list[dict]:
+        cursor = await self.db.execute(
+            "SELECT * FROM webhooks WHERE workspace_id = ? AND active = 1 ORDER BY created_at DESC",
             (self.workspace_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_webhook_by_id(self, webhook_id: str) -> dict | None:
+        cursor = await self.db.execute(
+            "SELECT * FROM webhooks WHERE id = ? AND workspace_id = ?",
+            (webhook_id, self.workspace_id),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def delete_webhook(self, webhook_id: str) -> bool:
+        cursor = await self.db.execute(
+            "UPDATE webhooks SET active = 0 WHERE id = ? AND workspace_id = ?",
+            (webhook_id, self.workspace_id),
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
+    async def queue_webhook_delivery(self, delivery: dict[str, Any]) -> None:
+        await self.db.execute(
+            """INSERT INTO webhook_deliveries(id, webhook_id, event, payload, status, attempts, created_at, workspace_id)
+               VALUES (?, ?, ?, ?, 'pending', 0, ?, ?)""",
+            (
+                delivery["id"],
+                delivery["webhook_id"],
+                delivery["event"],
+                delivery["payload"],
+                delivery.get("created_at", _now_iso()),
+                self.workspace_id,
+            ),
+        )
+        await self.db.commit()
+
+    async def get_pending_deliveries(self) -> list[dict]:
+        cursor = await self.db.execute(
+            """SELECT * FROM webhook_deliveries
+               WHERE status = 'pending' AND attempts < 3 AND workspace_id = ?
+               ORDER BY created_at ASC LIMIT 100""",
+            (self.workspace_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def mark_delivery_done(self, delivery_id: str) -> None:
+        await self.db.execute(
+            "UPDATE webhook_deliveries SET status = 'done', attempts = attempts + 1 WHERE id = ?",
+            (delivery_id,),
+        )
+        await self.db.commit()
+
+    async def mark_delivery_failed(self, delivery_id: str) -> None:
+        await self.db.execute(
+            """UPDATE webhook_deliveries
+               SET attempts = attempts + 1,
+                   status = CASE WHEN attempts + 1 >= 3 THEN 'failed' ELSE 'pending' END
+               WHERE id = ?""",
+            (delivery_id,),
+        )
+        await self.db.commit()
+
+    # ── Resolution rule methods ───────────────────────────────────────
+
+    async def insert_rule(self, rule: dict[str, Any]) -> None:
+        await self.db.execute(
+            """INSERT INTO resolution_rules(id, scope_prefix, condition_type, condition_value,
+               resolution_type, created_at, active, workspace_id)
+               VALUES (?, ?, ?, ?, ?, ?, 1, ?)""",
+            (
+                rule["id"],
+                rule["scope_prefix"],
+                rule["condition_type"],
+                rule["condition_value"],
+                rule["resolution_type"],
+                rule.get("created_at", _now_iso()),
+                self.workspace_id,
+            ),
+        )
+        await self.db.commit()
+
+    async def get_rules(self) -> list[dict]:
+        cursor = await self.db.execute(
+            "SELECT * FROM resolution_rules WHERE workspace_id = ? AND active = 1 ORDER BY created_at DESC",
+            (self.workspace_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_rule_by_id(self, rule_id: str) -> dict | None:
+        cursor = await self.db.execute(
+            "SELECT * FROM resolution_rules WHERE id = ? AND workspace_id = ?",
+            (rule_id, self.workspace_id),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def delete_rule(self, rule_id: str) -> bool:
+        cursor = await self.db.execute(
+            "UPDATE resolution_rules SET active = 0 WHERE id = ? AND workspace_id = ?",
+            (rule_id, self.workspace_id),
+        )
+        await self.db.commit()
+        return cursor.rowcount > 0
+
+    # ── Scope registry methods ────────────────────────────────────────
+
+    async def upsert_scope(self, scope_data: dict[str, Any]) -> None:
+        now = _now_iso()
+        await self.db.execute(
+            """INSERT INTO scopes(scope, description, owner_agent_id, retention_days, created_at, workspace_id)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(scope, workspace_id) DO UPDATE SET
+                   description = COALESCE(excluded.description, description),
+                   owner_agent_id = COALESCE(excluded.owner_agent_id, owner_agent_id),
+                   retention_days = COALESCE(excluded.retention_days, retention_days)""",
+            (
+                scope_data["scope"],
+                scope_data.get("description"),
+                scope_data.get("owner_agent_id"),
+                scope_data.get("retention_days"),
+                now,
+                self.workspace_id,
+            ),
+        )
+        await self.db.commit()
+
+    async def get_scopes(self) -> list[dict]:
+        cursor = await self.db.execute(
+            "SELECT * FROM scopes WHERE workspace_id = ? ORDER BY scope ASC",
+            (self.workspace_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_scope_by_name(self, scope: str) -> dict | None:
+        cursor = await self.db.execute(
+            "SELECT * FROM scopes WHERE scope = ? AND workspace_id = ?",
+            (scope, self.workspace_id),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def get_scope_analytics(self, scope: str) -> dict:
+        """Return analytics for a given scope: fact counts, conflict rate, top agent, avg confidence."""
+        # Total fact count (all, including retired)
+        cur = await self.db.execute(
+            "SELECT COUNT(*) as cnt FROM facts WHERE scope = ? AND workspace_id = ?",
+            (scope, self.workspace_id),
+        )
+        row = await cur.fetchone()
+        fact_count = row["cnt"] if row else 0
+
+        # Active fact count
+        cur = await self.db.execute(
+            "SELECT COUNT(*) as cnt FROM facts WHERE scope = ? AND workspace_id = ? AND valid_until IS NULL",
+            (scope, self.workspace_id),
+        )
+        row = await cur.fetchone()
+        active_fact_count = row["cnt"] if row else 0
+
+        # Conflict count
+        cur = await self.db.execute(
+            """SELECT COUNT(*) as cnt FROM conflicts c
+               JOIN facts fa ON c.fact_a_id = fa.id
+               WHERE fa.scope = ? AND c.workspace_id = ?""",
+            (scope, self.workspace_id),
+        )
+        row = await cur.fetchone()
+        conflict_count = row["cnt"] if row else 0
+
+        conflict_rate = round(conflict_count / fact_count, 4) if fact_count > 0 else 0.0
+
+        # Most active agent
+        cur = await self.db.execute(
+            """SELECT agent_id, COUNT(*) as cnt FROM facts
+               WHERE scope = ? AND workspace_id = ?
+               GROUP BY agent_id ORDER BY cnt DESC LIMIT 1""",
+            (scope, self.workspace_id),
+        )
+        row = await cur.fetchone()
+        most_active_agent = row["agent_id"] if row else None
+
+        # Average confidence
+        cur = await self.db.execute(
+            "SELECT AVG(confidence) as avg_conf FROM facts WHERE scope = ? AND workspace_id = ? AND valid_until IS NULL",
+            (scope, self.workspace_id),
+        )
+        row = await cur.fetchone()
+        avg_confidence = (
+            round(float(row["avg_conf"]), 4) if row and row["avg_conf"] is not None else 0.0
+        )
+
+        return {
+            "scope": scope,
+            "fact_count": fact_count,
+            "active_fact_count": active_fact_count,
+            "conflict_count": conflict_count,
+            "conflict_rate": conflict_rate,
+            "most_active_agent": most_active_agent,
+            "avg_confidence": avg_confidence,
+        }
+
+    # ── Audit log methods ─────────────────────────────────────────────
+
+    async def insert_audit_entry(self, entry: dict[str, Any]) -> None:
+        await self.db.execute(
+            """INSERT INTO audit_log(id, operation, agent_id, fact_id, conflict_id, extra, timestamp, workspace_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                entry["id"],
+                entry["operation"],
+                entry.get("agent_id"),
+                entry.get("fact_id"),
+                entry.get("conflict_id"),
+                entry.get("extra"),
+                entry.get("timestamp", _now_iso()),
+                self.workspace_id,
+            ),
+        )
+        await self.db.commit()
+
+    async def get_audit_log(
+        self,
+        agent_id: str | None = None,
+        operation: str | None = None,
+        from_ts: str | None = None,
+        to_ts: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        conditions = ["workspace_id = ?"]
+        params: list[Any] = [self.workspace_id]
+
+        if agent_id:
+            conditions.append("agent_id = ?")
+            params.append(agent_id)
+        if operation:
+            conditions.append("operation = ?")
+            params.append(operation)
+        if from_ts:
+            conditions.append("timestamp >= ?")
+            params.append(from_ts)
+        if to_ts:
+            conditions.append("timestamp <= ?")
+            params.append(to_ts)
+
+        where = " AND ".join(conditions)
+        params.append(limit)
+        cursor = await self.db.execute(
+            f"SELECT * FROM audit_log WHERE {where} ORDER BY timestamp DESC LIMIT ?",
+            params,
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]

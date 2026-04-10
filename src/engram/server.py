@@ -20,7 +20,7 @@ import logging
 import os
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
@@ -119,7 +119,7 @@ async def engram_status() -> dict[str, Any]:
     **Common mistake:** Starting tasks without calling engram_status first, leading to
     "disconnected" errors mid-task.
     """
-    from engram.workspace import is_configured, is_team_mode, read_workspace, WORKSPACE_PATH
+    from engram.workspace import read_workspace, WORKSPACE_PATH
 
     ws = read_workspace()
 
@@ -333,11 +333,12 @@ async def engram_join(invite_key: str) -> dict[str, Any]:
     schema = payload.get("schema", "engram")  # backward compatibility
     key_generation = payload.get("key_generation", 0)
 
-    # Server-side validation: check uses_remaining and expiry in the database
+    # Atomically validate and consume the invite key in a single query
+    # to prevent TOCTOU race conditions with concurrent joins.
     key_hash = invite_key_hash(invite_key)
     if _storage is not None:
-        key_row = await _storage.validate_invite_key(key_hash)
-        if key_row is None:
+        consumed = await _storage.consume_invite_key(key_hash)
+        if consumed is None:
             return {
                 "status": "error",
                 "next_prompt": (
@@ -345,7 +346,6 @@ async def engram_join(invite_key: str) -> dict[str, Any]:
                     "Ask the workspace creator to generate a new one with engram_reset_invite_key."
                 ),
             }
-        await _storage.consume_invite_key(key_hash)
 
     # Write workspace.json — db_url extracted silently, never shown to user
     config = WorkspaceConfig(
@@ -433,7 +433,6 @@ async def engram_reset_invite_key(
         }
 
     import time
-    from datetime import timezone
 
     # Revoke all existing invite keys and bump the generation counter
     await _storage.revoke_all_invite_keys(ws.engram_id)
@@ -504,8 +503,8 @@ async def engram_reset_invite_key(
 )
 async def engram_commit(
     content: str,
-    scope: str,
-    confidence: float,
+    scope: str = "general",
+    confidence: float = 0.8,
     agent_id: str | None = None,
     engineer: str | None = None,
     corrects_lineage: str | None = None,
@@ -553,10 +552,12 @@ async def engram_commit(
       relevant. BAD: "auth is broken". GOOD: "The auth service
       rate-limits to 1000 req/s per IP using a sliding window in Redis,
       configured via AUTH_RATE_LIMIT in .env".
-    - scope: Hierarchical topic path. Examples: "auth", "payments/webhooks",
-      "infra/docker". Use consistent scopes across your team.
-    - confidence: 0.0-1.0. How certain is this claim? 1.0 = verified in
-      code. 0.7 = observed behavior. 0.3 = inferred from context.
+    - scope: Hierarchical topic path. Defaults to "general". Examples:
+      "auth", "payments/webhooks", "infra/docker". Use consistent scopes
+      across your team.
+    - confidence: 0.0-1.0. Defaults to 0.8. How certain is this claim?
+      1.0 = verified in code. 0.7 = observed behavior. 0.3 = inferred
+      from context.
     - agent_id: Your agent identifier. Use your agent name for attribution
       (e.g. the name field from your AgentConfig when using open-multi-agent).
       Auto-generated if omitted.
@@ -597,7 +598,7 @@ async def engram_commit(
                      or context that hasn't proven its value yet.
 
     Returns: {fact_id, committed_at, duplicate, conflicts_detected,
-              memory_op, supersedes_fact_id, durability}
+              memory_op, supersedes_fact_id, durability, suggestions}
     """
     engine = get_engine()
 
@@ -663,6 +664,7 @@ async def engram_query(
     fact_type: str | None = None,
     agent_id: str | None = None,
     include_ephemeral: bool = False,
+    include_adjacent: bool = False,
 ) -> list[dict[str, Any]]:
     """Query what your team's agents collectively know about a topic.
 
@@ -700,10 +702,15 @@ async def engram_query(
       facts. Ephemeral facts that appear in query results are tracked;
       once queried twice they are automatically promoted to durable.
       Default: false.
+    - include_adjacent: When true and a scope is provided, also searches
+      sibling and parent scopes for semantically related facts. Adjacent
+      results are marked with adjacent=true and include their original_scope
+      so you can distinguish in-scope from related knowledge. Useful when
+      a query might benefit from cross-cutting context. Default: false.
 
     Returns: List of claims with content, scope, confidence, agent_id,
     committed_at, has_open_conflict, verified, fact_type, durability,
-    and provenance metadata.
+    adjacent, and provenance metadata.
     """
     engine = get_engine()
 
@@ -753,6 +760,7 @@ async def engram_query(
         as_of=as_of,
         fact_type=fact_type,
         include_ephemeral=include_ephemeral,
+        include_adjacent=include_adjacent,
     )
 
 
@@ -843,6 +851,78 @@ async def engram_resolve(
     )
 
 
+# ── engram_batch_commit ──────────────────────────────────────────────
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+    }
+)
+async def engram_batch_commit(
+    facts: list[dict[str, Any]],
+    agent_id: str | None = None,
+    engineer: str | None = None,
+) -> dict[str, Any]:
+    """Commit multiple facts to shared team memory in a single call.
+
+    Use this to bootstrap knowledge from wikis, runbooks, ADRs, or any
+    structured source — rather than making dozens of individual engram_commit
+    calls.  Each fact goes through the same full pipeline as engram_commit
+    (dedup, secret scan, embedding, conflict detection), so no quality is
+    lost by batching.
+
+    A validation or secret-scan failure on one fact does NOT abort the batch.
+    Inspect the per-fact "status" in the results list to see what happened.
+
+    Parameters:
+    - facts: List of fact objects.  Each object may include:
+        - content (required): The claim in plain English.
+        - scope (required): Hierarchical topic path, e.g. "auth/jwt".
+        - confidence (required): 0.0–1.0.
+        - fact_type: "observation" | "inference" | "decision". Default: observation.
+        - agent_id: Overrides the top-level agent_id for this specific fact.
+        - engineer: Overrides the top-level engineer for this specific fact.
+        - provenance: Evidence trail (file path, test output, etc.).
+        - ttl_days: Optional TTL in days.
+        - operation: "add" | "update" | "delete" | "none". Default: add.
+        - durability: "durable" | "ephemeral". Default: durable.
+        - corrects_lineage: lineage_id to supersede (for update/delete ops).
+    - agent_id: Default agent_id applied to all facts that omit it.
+    - engineer: Default engineer applied to all facts that omit it.
+
+    Returns:
+    {
+      total: int,          # number of facts submitted
+      committed: int,      # successfully written (not duplicates)
+      duplicates: int,     # already existed — no-op
+      failed: int,         # validation or secret-scan errors
+      results: [           # per-fact outcome, preserving input order
+        {index, status: "ok"|"duplicate"|"error", fact_id?, error?}
+      ]
+    }
+
+    Limits: Maximum 100 facts per batch.
+    """
+    engine = get_engine()
+
+    # Key generation check
+    from engram.workspace import read_workspace as _rw
+
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+
+    return await engine.batch_commit(
+        facts=facts,
+        default_agent_id=agent_id,
+        default_engineer=engineer,
+    )
+
+
 # ── engram_promote ───────────────────────────────────────────────────
 
 
@@ -886,3 +966,287 @@ async def engram_promote(fact_id: str) -> dict[str, Any]:
     """
     engine = get_engine()
     return await engine.promote(fact_id=fact_id)
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+    },
+)
+async def engram_feedback(
+    conflict_id: str,
+    feedback: str,
+) -> dict[str, Any]:
+    """Record human feedback on a conflict detection to improve accuracy.
+
+    Call this after reviewing a conflict to label it as a real contradiction
+    (true_positive) or a false alarm (false_positive). Feedback is aggregated
+    in workspace statistics and can be used to tune detection thresholds.
+
+    Parameters:
+    - conflict_id: The ID of the conflict to annotate.
+    - feedback: 'true_positive' (real conflict) or 'false_positive' (false alarm).
+
+    Returns: {recorded: true, conflict_id, feedback}
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.record_feedback(conflict_id=conflict_id, feedback=feedback)
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def engram_timeline(
+    scope: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Return the chronological fact history for audit and debugging.
+
+    Useful for understanding how shared knowledge in a scope has evolved over
+    time, reviewing what was committed and when, and spotting lineage chains.
+
+    Parameters:
+    - scope: Optional scope prefix to filter (e.g. 'auth', 'infra').
+    - limit: Max facts to return (1–200, default 50).
+
+    Returns: List of fact summaries ordered by valid_from ascending.
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.get_timeline(scope=scope, limit=limit)
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def engram_agents() -> list[dict[str, Any]]:
+    """List all registered agents and their activity statistics.
+
+    Returns each agent's commit count, flagged count, engineer association,
+    and last-seen timestamp. Useful for auditing which agents are active
+    and identifying agents with high flag rates.
+
+    Returns: List of agent records ordered by last_seen descending.
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.get_agents()
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def engram_lineage(lineage_id: str) -> list[dict[str, Any]]:
+    """Return the full version history of a fact lineage.
+
+    Every time a fact is corrected or updated via corrects_lineage, a new
+    version is appended to the same lineage. This tool shows all versions
+    ordered newest-first so you can trace how a piece of knowledge evolved.
+
+    Parameters:
+    - lineage_id: The lineage UUID to look up (from any fact's lineage_id field).
+
+    Returns: List of fact dicts (newest first). Empty if lineage not found.
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.get_lineage(lineage_id)
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def engram_expiring(days_ahead: int = 7) -> list[dict[str, Any]]:
+    """Return facts whose TTL will expire within the next N days.
+
+    Call this periodically to proactively refresh knowledge before it expires.
+    Facts listed here have a valid_until set and will become invisible to
+    normal queries once that timestamp passes.
+
+    Parameters:
+    - days_ahead: Look-ahead window in days (1–30, default 7).
+
+    Returns: List of expiring facts ordered by valid_until ascending (soonest first).
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.get_expiring_facts(days_ahead=days_ahead)
+
+
+@mcp.tool(
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+    },
+)
+async def engram_bulk_dismiss(
+    conflict_ids: list[str],
+    reason: str,
+    agent_id: str | None = None,
+) -> dict[str, Any]:
+    """Dismiss multiple open conflicts in one call.
+
+    Use after reviewing a batch of false-positive detections, or after a
+    large refactor that makes many existing conflicts obsolete. Each conflict
+    is dismissed individually — a failure on one does not abort the rest.
+
+    Parameters:
+    - conflict_ids: List of conflict IDs to dismiss (max 100).
+    - reason: Human-readable explanation recorded on each conflict.
+    - agent_id: Optional agent performing the dismissal (for audit trail).
+
+    Returns: {total, dismissed, failed, results: [{conflict_id, status, error?}]}
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.bulk_dismiss(
+        conflict_ids=conflict_ids,
+        reason=reason,
+        dismissed_by=agent_id,
+    )
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def engram_export(
+    format: Literal["json", "markdown"] = "json",
+    scope: str | None = None,
+) -> dict[str, Any]:
+    """Export workspace as a portable JSON or Markdown snapshot.
+
+    Use this to create backups, share knowledge with non-Engram users,
+    or migrate data to another workspace.
+
+    JSON format produces a machine-readable document suitable for backup,
+    migration, or tooling integration. It includes all current facts,
+    conflicts, and metadata.
+
+    Markdown format produces a human-readable document grouped by scope.
+    Paste it into Confluence, a PR description, or an onboarding doc.
+
+    IMPORTANT: This is a read-only operation — it does not modify your
+    workspace. Both durable and ephemeral facts are included.
+
+    IMPORTANT: If secrets are detected in fact content, they are
+    automatically redacted and a warning is added to the metadata.
+
+    Parameters:
+    - format: Output format — "json" or "markdown".
+    - scope: Optional scope prefix filter (e.g., "auth" returns facts
+      in "auth", "auth/jwt", "auth/oauth", etc.).
+
+    Returns: Export document with metadata, facts, and conflicts.
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+
+    _ws = _rw()
+    if not _ws:
+        return {"error": "Workspace not initialized. Run engram_init first."}
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+
+    if format not in ("json", "markdown"):
+        return {"error": f"Invalid format '{format}'. Supported: json, markdown"}
+
+    try:
+        return await engine.export_workspace(format=format, scope=scope)
+    except Exception as exc:
+        logger.exception("engram_export error")
+        return {"error": str(exc)}
+
+
+# ── engram_create_webhook ─────────────────────────────────────────────
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
+async def engram_create_webhook(
+    url: str,
+    events: list[str],
+    secret: str | None = None,
+) -> dict[str, Any]:
+    """Register a webhook URL to receive event notifications.
+
+    Events fired: 'fact.committed', 'conflict.detected', 'conflict.resolved',
+    'fact.expired'. Use '*' in events list to subscribe to all.
+
+    Parameters:
+    - url: The HTTPS URL to POST event payloads to.
+    - events: List of event types to subscribe to.
+    - secret: Optional HMAC secret for payload signing (X-Engram-Signature header).
+
+    Returns: {webhook_id, url, events, created_at}
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.create_webhook(url=url, events=events, secret=secret)
+
+
+# ── engram_create_rule ────────────────────────────────────────────────
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
+async def engram_create_rule(
+    scope_prefix: str,
+    condition_type: str,
+    condition_value: str,
+    resolution_type: str = "winner",
+) -> dict[str, Any]:
+    """Create an auto-resolution rule for a scope prefix.
+
+    When a conflict is detected in a matching scope, the rule fires and
+    automatically resolves the conflict without human intervention.
+
+    Parameters:
+    - scope_prefix: Scope prefix to match (e.g. 'auth', 'payments/').
+    - condition_type: One of 'latest_wins', 'highest_confidence', 'confidence_delta'.
+    - condition_value: For 'confidence_delta', the minimum delta (e.g. '0.2').
+      For other types, pass an empty string or '1'.
+    - resolution_type: Resolution type to apply (default 'winner').
+
+    Returns: {rule_id, scope_prefix, condition_type, condition_value, resolution_type, created_at}
+    """
+    engine = get_engine()
+    from engram.workspace import read_workspace as _rw
+
+    _ws = _rw()
+    _disc = await _check_key_generation(_ws)
+    if _disc:
+        return _disc
+    return await engine.create_rule(
+        scope_prefix=scope_prefix,
+        condition_type=condition_type,
+        condition_value=condition_value,
+        resolution_type=resolution_type,
+    )

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import platform as _platform
 import sys
 from pathlib import Path
 
@@ -35,8 +36,6 @@ def main() -> None:
 # Comprehensive list covering all known MCP-compatible IDEs, editors, CLI
 # tools, and desktop apps that store their config in a discoverable file.
 # Entries are grouped by category for readability.
-
-import platform as _platform
 
 
 def _xdg_config() -> Path:
@@ -601,8 +600,8 @@ async def _serve(
         from engram.storage import SQLiteStorage
 
         effective_db = db_path or str(DEFAULT_DB_PATH)
-        storage = SQLiteStorage(db_path=effective_db)
-        logger.info("Local mode: SQLite (%s)", effective_db)
+        storage = SQLiteStorage(db_path=effective_db, workspace_id=workspace_id)
+        logger.info("Local mode: SQLite (%s, workspace: %s)", effective_db, workspace_id)
 
     await storage.connect()
 
@@ -653,11 +652,18 @@ async def _serve(
             logger.info("Dashboard: http://%s:%d/dashboard", host, port)
             from engram.dashboard import build_dashboard_routes
             from engram.federation import build_federation_routes
+            from engram.rest import build_rest_routes
             import uvicorn
-            from starlette.routing import Mount, Route
+            from starlette.routing import Mount
 
             dashboard_routes = build_dashboard_routes(storage)
             federation_routes = build_federation_routes(storage)
+            rest_routes = build_rest_routes(
+                engine=engine,
+                storage=storage,
+                auth_enabled=auth_enabled,
+                rate_limiter=server_module._rate_limiter,
+            )
             mcp_app = mcp.streamable_http_app()
 
             # Add routes to MCP app
@@ -665,6 +671,7 @@ async def _serve(
                 [
                     Mount("/dashboard", routes=dashboard_routes),
                     Mount("/api/federation", routes=federation_routes),
+                    *rest_routes,
                 ]
             )
 
@@ -700,189 +707,246 @@ def token_create(engineer: str, agent_id: str | None, expires_hours: int) -> Non
     click.echo(tok)
 
 
-# ── engram config ─────────────────────────────────────────────────────
+# ── engram config ────────────────────────────────────────────────────
 
 
 @main.group()
 def config() -> None:
-    """View and update workspace configuration."""
+    """Show and update workspace settings."""
     pass
 
 
 @config.command("show")
 def config_show() -> None:
-    """Pretty-print the current workspace configuration."""
-    from engram.workspace import read_workspace, WORKSPACE_PATH
-    import os
+    """Pretty-print the current editable workspace settings."""
+    from engram.workspace import read_workspace_settings
 
-    if not WORKSPACE_PATH.exists():
-        db_url = os.environ.get("ENGRAM_DB_URL", "")
-        if not db_url:
-            click.echo("Error: No workspace configured.")
-            click.echo("  Run: engram init   or   engram join <invite-key>")
-            return
-        # Show env-based config
-        click.echo("=== Engram Configuration (from environment) ===")
-        click.echo(f"Mode: local (SQLite)")
-        click.echo(
-            f"Database URL: {db_url[:30]}..." if len(db_url) > 30 else f"Database URL: {db_url}"
-        )
-        return
+    try:
+        settings = read_workspace_settings()
+    except ValueError as e:
+        raise click.ClickException(str(e))
 
-    ws = read_workspace()
-    if not ws:
-        click.echo("Error: Invalid workspace.json")
-        return
-
-    mode = "team (PostgreSQL)" if ws.db_url else "local (SQLite)"
-    click.echo("=== Engram Configuration ===")
-    click.echo(f"Engram ID: {ws.engram_id}")
-    click.echo(f"Mode: {mode}")
-    click.echo(f"Schema: {ws.schema}")
-    click.echo(f"Display Name: {ws.display_name or '(not set)'}")
-    click.echo(f"Anonymous Mode: {ws.anonymous_mode}")
-    click.echo(f"Anon Agents: {ws.anon_agents}")
-    if ws.db_url:
-        click.echo(
-            f"Database: {ws.db_url[:40]}..." if len(ws.db_url) > 40 else f"Database: {ws.db_url}"
-        )
+    click.echo(json.dumps(settings, indent=2))
 
 
 @config.command("set")
 @click.argument("key")
 @click.argument("value")
 def config_set(key: str, value: str) -> None:
-    """Update a single configuration field with validation.
+    """Update a single editable workspace setting."""
+    from engram.workspace import parse_config_value, set_workspace_setting
 
-    Keys: anonymous_mode, anon_agents, display_name
+    try:
+        parsed_value = parse_config_value(key, value)
+        set_workspace_setting(key, value)
+    except ValueError as e:
+        raise click.ClickException(str(e))
 
-    Examples:
-        engram config set display_name "My Team"
-        engram config set anonymous_mode true
-        engram config set anon_agents false
-    """
-    from engram.workspace import read_workspace, write_workspace, WORKSPACE_PATH
+    click.echo(f"Updated {key}={json.dumps(parsed_value)}")
+
+
+# ── engram search ────────────────────────────────────────────────────
+
+
+def _format_search_results(topic: str, results: list[dict[str, object]]) -> str:
+    """Format search results for human-readable terminal output."""
+    if not results:
+        return f'No results found for "{topic}".'
+
+    lines = [f'Results for "{topic}" ({len(results)}):']
+    for idx, fact in enumerate(results, start=1):
+        scope = fact.get("scope") or "-"
+        content = fact.get("content") or ""
+        lines.append(f"{idx}. [{scope}] {content}")
+
+        meta: list[str] = []
+        if fact.get("fact_type"):
+            meta.append(f"type={fact['fact_type']}")
+        if fact.get("confidence") is not None:
+            meta.append(f"confidence={fact['confidence']:.2f}")
+        if fact.get("verified"):
+            meta.append("verified=yes")
+        if fact.get("provenance"):
+            meta.append(f"provenance={fact['provenance']}")
+        if fact.get("has_open_conflict"):
+            meta.append("open_conflict=yes")
+
+        if meta:
+            lines.append("   " + " ".join(meta))
+
+    return "\n".join(lines)
+
+
+async def _search_once(topic: str, scope: str | None, limit: int, as_json: bool) -> str:
+    """Run one terminal search against the current workspace."""
     import os
 
-    valid_keys = {"anonymous_mode", "anon_agents", "display_name"}
-    if key not in valid_keys:
-        click.echo(f"Error: Invalid key '{key}'. Valid keys: {', '.join(sorted(valid_keys))}")
-        return
+    from engram.engine import EngramEngine
 
-    if not WORKSPACE_PATH.exists():
-        click.echo("Error: No workspace configured.")
-        click.echo("  Run: engram init   or   engram join <invite-key>")
-        return
+    logger = logging.getLogger("engram")
 
-    ws = read_workspace()
-    if not ws:
-        click.echo("Error: Invalid workspace.json")
-        return
+    # Match the same backend-selection logic used by serve()
+    db_url = os.environ.get("ENGRAM_DB_URL", "")
+    workspace_id = "local"
+    schema = "engram"
 
-    # Validate and set value
-    if key in ("anonymous_mode", "anon_agents"):
-        if value.lower() not in ("true", "false"):
-            click.echo(f"Error: Value for '{key}' must be 'true' or 'false'")
-            return
-        bool_value = value.lower() == "true"
-        if key == "anonymous_mode":
-            ws.anonymous_mode = bool_value
-        else:
-            ws.anon_agents = bool_value
-    else:  # display_name
-        ws.display_name = value
-
-    write_workspace(ws)
-    click.echo(f"✓ Updated {key} = {value}")
-
-
-# ── engram tail ─────────────────────────────────────────────────────────
-
-
-@main.command()
-@click.option("--interval", default=2, type=int, help="Polling interval in seconds (default: 2).")
-@click.option("--scope", default=None, help="Filter by scope prefix (e.g., 'payments').")
-@click.option(
-    "--max-count", default=None, type=int, help="Stop after N facts (default: run forever)."
-)
-def tail(interval: int, scope: str | None, max_count: int | None) -> None:
-    """Live stream of incoming workspace commits.
-
-    Like 'tail -f' but for shared team memory. Polls for new facts committed
-    to the workspace and prints them in real-time.
-
-    Examples:
-        engram tail                    # Stream all new facts
-        engram tail --scope payments   # Only facts in payments scope
-        engram tail --interval 5      # Poll every 5 seconds
-        engram tail --max-count 10     # Stop after 10 facts
-    """
-    import os
-    import time
-    import urllib.request
-    import urllib.error
-
-    ws = None
     try:
         from engram.workspace import read_workspace
 
         ws = read_workspace()
+        if ws and ws.db_url:
+            db_url = ws.db_url
+            workspace_id = ws.engram_id
+            schema = ws.schema
     except Exception:
         pass
 
-    # Determine the MCP URL
-    mcp_url = os.environ.get("ENGRAM_MCP_URL", "http://localhost:7474")
-    base_url = mcp_url.replace("/mcp", "") if "/mcp" in mcp_url else mcp_url
+    if db_url:
+        from engram.postgres_storage import PostgresStorage
 
-    # Get workspace ID for filtering
-    workspace_id = ws.engram_id if ws and ws.engram_id else "local"
-    if ws and ws.db_url:
-        scope_filter = f"{workspace_id}.{scope}" if scope else workspace_id
+        storage = PostgresStorage(db_url=db_url, workspace_id=workspace_id, schema=schema)
+        logger.info("Search mode: PostgreSQL (workspace: %s, schema: %s)", workspace_id, schema)
     else:
-        scope_filter = scope or workspace_id
+        from engram.storage import SQLiteStorage
 
-    last_time = int(time.time() * 1000)
-    count = 0
+        storage = SQLiteStorage(db_path=str(DEFAULT_DB_PATH), workspace_id=workspace_id)
+        logger.info("Search mode: SQLite (%s, workspace: %s)", DEFAULT_DB_PATH, workspace_id)
 
-    click.echo(f"Watching for new facts... (polling every {interval}s, scope: {scope_filter})")
-    click.echo("Press Ctrl+C to stop\n")
+    await storage.connect()
+    engine = EngramEngine(storage)
+
+    try:
+        results = await engine.query(topic=topic, scope=scope, limit=limit)
+    finally:
+        await storage.close()
+
+    if as_json:
+        return json.dumps(results, indent=2)
+
+    return _format_search_results(topic, results)
+
+
+@main.command()
+@click.argument("topic")
+@click.option("--scope", default=None, help="Optional scope prefix to filter results.")
+@click.option(
+    "--limit",
+    default=10,
+    type=click.IntRange(1, 50),
+    show_default=True,
+    help="Maximum results to print.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Print raw JSON results for piping.")
+def search(topic: str, scope: str | None, limit: int, as_json: bool) -> None:
+    """Query the workspace directly from the terminal without an agent session."""
+    try:
+        output = asyncio.run(
+            _search_once(
+                topic=topic,
+                scope=scope,
+                limit=limit,
+                as_json=as_json,
+            )
+        )
+    except Exception as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(output)
+
+
+# ── engram tail ──────────────────────────────────────────────────────
+
+
+def _format_tail_fact(fact: dict[str, object]) -> str:
+    """Format one fact for streaming terminal output."""
+    agent = fact.get("agent_id") or "unknown"
+    scope = fact.get("scope") or "-"
+    content = fact.get("content") or ""
+    confidence = fact.get("confidence")
+
+    if confidence is not None:
+        return f"[{agent}] [{scope}] {content} (confidence: {confidence:.2f})"
+
+    return f"[{agent}] [{scope}] {content}"
+
+
+async def _tail_once(
+    base_url: str,
+    after: str,
+    scope: str | None,
+    limit: int,
+) -> tuple[list[dict[str, object]], str]:
+    """Fetch facts newer than the watermark from the REST API."""
+    import urllib.parse
+    import urllib.request
+
+    params = {"after": after, "limit": str(limit)}
+    if scope:
+        params["scope"] = scope
+
+    url = f"{base_url.rstrip('/')}/api/tail?{urllib.parse.urlencode(params)}"
+
+    with urllib.request.urlopen(url, timeout=30) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+
+    facts = payload.get("facts", [])
+    latest_timestamp = payload.get("latest_timestamp", after)
+    return facts, latest_timestamp
+
+
+@main.command()
+@click.option("--scope", default=None, help="Optional scope prefix to filter streamed facts.")
+@click.option(
+    "--limit",
+    default=100,
+    type=click.IntRange(1, 1000),
+    show_default=True,
+    help="Maximum facts per poll.",
+)
+@click.option(
+    "--interval",
+    default=2.0,
+    type=float,
+    show_default=True,
+    help="Polling interval in seconds.",
+)
+@click.option(
+    "--url",
+    "base_url",
+    default="http://127.0.0.1:7474",
+    show_default=True,
+    help="Base URL for the Engram HTTP server.",
+)
+def tail(scope: str | None, limit: int, interval: float, base_url: str) -> None:
+    """Stream new workspace facts from the terminal."""
+    from datetime import datetime, timezone
+
+    click.echo("Starting tail stream. Press Ctrl+C to stop.")
+
+    after = datetime.now(timezone.utc).isoformat()
 
     try:
         while True:
-            try:
-                url = f"{base_url}/api/federation/facts?after={last_time}&scope={scope_filter}&limit=50"
-                req = urllib.request.Request(url, headers={"Accept": "application/json"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = json.loads(resp.read())
-                    facts = data.get("facts", [])
+            facts, latest_timestamp = asyncio.run(
+                _tail_once(
+                    base_url=base_url,
+                    after=after,
+                    scope=scope,
+                    limit=limit,
+                )
+            )
 
-                    for fact in facts:
-                        fact_time = fact.get("created_at", 0)
-                        if fact_time > last_time:
-                            last_time = fact_time
+            for fact in facts:
+                click.echo(_format_tail_fact(fact))
 
-                        agent = fact.get("agent_id", "?")
-                        fact_scope = fact.get("scope", "")
-                        content = fact.get("content", "")[:100]
-                        if len(fact.get("content", "")) > 100:
-                            content += "..."
-
-                        click.echo(f"[{agent}] [{fact_scope}] {content}")
-
-                        count += 1
-                        if max_count and count >= max_count:
-                            click.echo(f"\nReached {max_count} facts, stopping.")
-                            return
-            except urllib.error.URLError as e:
-                click.echo(f"Warning: Could not fetch facts: {e.reason}", err=True)
-            except json.JSONDecodeError:
-                click.echo("Warning: Invalid response from server", err=True)
-            except Exception as e:
-                click.echo(f"Error: {e}", err=True)
+            after = latest_timestamp
+            import time
 
             time.sleep(interval)
     except KeyboardInterrupt:
-        click.echo(f"\nStopped after {count} facts.")
+        click.echo("\nStopped.")
+    except Exception as exc:
+        raise click.ClickException(str(exc))
 
 
 # ── engram status ───────────────────────────────────────────────────────
@@ -929,72 +993,6 @@ def status() -> None:
         click.echo(f"Display Name: {ws.display_name}")
 
     click.echo(f"\nSchema: {ws.schema}")
-
-
-# ── engram search ─────────────────────────────────────────────────────────
-
-
-@main.command()
-@click.argument("query", required=False, default="")
-@click.option("--scope", default=None, help="Filter by scope prefix.")
-@click.option("--limit", default=10, type=int, help="Max results (default: 10).")
-@click.option("--json", "output_json", is_flag=True, help="Output as JSON for piping.")
-def search(query: str, scope: str | None, limit: int, output_json: bool) -> None:
-    """Query the workspace from the terminal.
-
-    Examples:
-        engram search "payments"
-        engram search "api" --scope backend --limit 20
-        engram search "" --json | jq '.facts[].content'
-    """
-    import urllib.request
-    import urllib.error
-    import os
-
-    ws = None
-    try:
-        from engram.workspace import read_workspace
-
-        ws = read_workspace()
-    except Exception:
-        pass
-
-    mcp_url = os.environ.get("ENGRAM_MCP_URL", "http://localhost:7474")
-    base_url = mcp_url.replace("/mcp", "") if "/mcp" in mcp_url else mcp_url
-
-    try:
-        params = f"query={query}&limit={limit}"
-        if scope:
-            params += f"&scope={scope}"
-        url = f"{base_url}/api/query?{params}"
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
-
-            if output_json:
-                click.echo(json.dumps(data, indent=2))
-            else:
-                facts = data.get("facts", [])
-                if not facts:
-                    click.echo("No results found.")
-                    return
-
-                click.echo(f"=== Search Results ({len(facts)}) ===\n")
-                for i, fact in enumerate(facts, 1):
-                    content = fact.get("content", "")[:200]
-                    if len(fact.get("content", "")) > 200:
-                        content += "..."
-                    agent = fact.get("agent_id", "?")
-                    fact_scope = fact.get("scope", "")
-                    confidence = fact.get("confidence", "")
-
-                    click.echo(f"[{i}] {content}")
-                    click.echo(f"    Agent: {agent} | Scope: {fact_scope} | Conf: {confidence}\n")
-    except urllib.error.URLError as e:
-        click.echo(f"Error: Could not connect to Engram server ({e.reason})", err=True)
-        click.echo("Make sure Engram is running: engram serve --http", err=True)
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
 
 
 # ── engram stats ───────────────────────────────────────────────────────────
@@ -1048,7 +1046,7 @@ def stats(output_json: bool) -> None:
         click.echo("=== Workspace Stats ===")
         click.echo(f"Workspace: {ws.engram_id}")
         click.echo(f"Mode: {'Team' if ws.db_url else 'Local'}")
-        click.echo(f"(Run engram serve --http to see full stats)")
+        click.echo("(Run engram serve --http to see full stats)")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
 
@@ -1233,10 +1231,10 @@ def verify(verbose: bool) -> None:
     # Check 1: workspace.json exists and is valid JSON
     click.echo("\n[1/4] Checking workspace configuration...")
     if not WORKSPACE_PATH.exists():
-        click.echo(f"  ✗ ~/.engram/workspace.json not found")
-        click.echo(f"    → Run: engram init   (or: engram join <key>)")
+        click.echo("  ✗ ~/.engram/workspace.json not found")
+        click.echo("    → Run: engram init   (or: engram join <key>)")
         click.echo(
-            f"    → Docs: https://github.com/Agentscreator/Engram/blob/main/docs/QUICKSTART.md"
+            "    → Docs: https://github.com/Agentscreator/Engram/blob/main/docs/QUICKSTART.md"
         )
         all_passed = False
     else:
@@ -1251,7 +1249,7 @@ def verify(verbose: bool) -> None:
                 click.echo(f"    - anonymous_mode: {ws.anonymous_mode if ws else 'N/A'}")
         except json.JSONDecodeError as e:
             click.echo(f"  ✗ workspace.json is invalid JSON: {e}")
-            click.echo(f"    → Delete and re-run: rm ~/.engram/workspace.json && engram init")
+            click.echo("    → Delete and re-run: rm ~/.engram/workspace.json && engram init")
             all_passed = False
 
     # Check 2: Backend is reachable (team mode only)
@@ -1275,15 +1273,15 @@ def verify(verbose: bool) -> None:
                     all_passed = False
         except urllib.error.URLError as e:
             # Non-critical: backend might not have /health endpoint
-            click.echo(f"  ⚠ Could not reach health endpoint (non-critical)")
+            click.echo("  ⚠ Could not reach health endpoint (non-critical)")
             if verbose:
                 click.echo(f"    - URL: {mcp_url}")
                 click.echo(f"    - Error: {e.reason}")
-                click.echo(f"    - Note: Backend connectivity will be verified by your IDE")
+                click.echo("    - Note: Backend connectivity will be verified by your IDE")
         except Exception as e:
             click.echo(f"  ⚠ Could not verify backend ({type(e).__name__}: {e})")
             if verbose:
-                click.echo(f"    - This is normal if you're offline or the backend is busy")
+                click.echo("    - This is normal if you're offline or the backend is busy")
     else:
         click.echo("  ○ Team mode not configured (local SQLite mode)")
         if verbose:
@@ -1326,11 +1324,11 @@ def verify(verbose: bool) -> None:
                 click.echo(f"    - ✓ {client_name}")
     else:
         click.echo("  ✗ Engram not found in any IDE MCP config")
-        click.echo(f"    → Run: engram install")
+        click.echo("    → Run: engram install")
         all_passed = False
 
     if missing and verbose:
-        click.echo(f"\n  Other detected IDEs (Engram not configured):")
+        click.echo("\n  Other detected IDEs (Engram not configured):")
         for client_name in missing[:5]:  # Limit verbose output
             click.echo(f"    - ○ {client_name}")
         if len(missing) > 5:
@@ -1355,12 +1353,12 @@ def verify(verbose: bool) -> None:
             break
 
     if not found_model:
-        click.echo(f"  ⚠ NLI model not cached (will download on first conflict detection)")
+        click.echo("  ⚠ NLI model not cached (will download on first conflict detection)")
         if verbose:
-            click.echo(f"    - Model: cross-encoder/nli-MiniLM2-L6-H768")
-            click.echo(f"    - Will be downloaded automatically when needed")
+            click.echo("    - Model: cross-encoder/nli-MiniLM2-L6-H768")
+            click.echo("    - Will be downloaded automatically when needed")
             click.echo(
-                f"    - This is optional - Engram works without it (Tier 1 detection disabled)"
+                "    - This is optional - Engram works without it (Tier 1 detection disabled)"
             )
 
     # Summary
@@ -1438,12 +1436,10 @@ def reembed(model: str | None, batch_size: int, dry_run: bool) -> None:
         from engram.postgres_storage import PostgresStorage
 
         storage = PostgresStorage(db_url=db_url, workspace_id=workspace_id, schema=schema)
-        mode = "team"
     else:
         from engram.storage import SQLiteStorage, DEFAULT_DB_PATH
 
         storage = SQLiteStorage(db_path=str(DEFAULT_DB_PATH))
-        mode = "local"
 
     async def run_reembed():
         await storage.connect()
@@ -1474,7 +1470,6 @@ def reembed(model: str | None, batch_size: int, dry_run: bool) -> None:
                     continue
 
                 # Count total
-                import asyncio
 
                 all_facts = await storage.get_facts_by_embedding_model(
                     target, limit=100000, offset=0
@@ -1620,9 +1615,8 @@ def setup(
 
         if result.get("status") == "initialized":
             engram_id = result.get("engram_id", "unknown")
-            invite_key = result.get("invite_key", "unknown")
             click.echo(f"  ✓ Workspace initialized: {engram_id}")
-            click.echo(f"  ✓ Invite key generated")
+            click.echo("  ✓ Invite key generated")
         else:
             click.echo(f"  ❌ Setup failed: {result.get('status')}")
             return
@@ -1662,6 +1656,67 @@ This project uses Engram for team memory. Before starting work on any task:
     click.echo("  1. Restart your IDE")
     click.echo("  2. Run: engram verify")
     click.echo("  3. Start working with your team!\n")
+
+
+# ── engram completion ─────────────────────────────────────────────────
+
+_SHELL_CONFIGS = {
+    "bash": ("~/.bashrc", 'eval "$(_ENGRAM_COMPLETE=bash_source engram)"'),
+    "zsh": ("~/.zshrc", 'eval "$(_ENGRAM_COMPLETE=zsh_source engram)"'),
+    "fish": (
+        "~/.config/fish/completions/engram.fish",
+        "_ENGRAM_COMPLETE=fish_source engram | source",
+    ),
+}
+
+
+@main.command()
+@click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]), required=False)
+def completion(shell: str | None) -> None:
+    """Install shell tab-completion for engram.
+
+    Detects your current shell automatically, or pass bash/zsh/fish
+    explicitly. Appends the completion hook to your shell profile.
+
+    \b
+    Examples:
+        engram completion          # auto-detect shell
+        engram completion zsh      # explicit shell
+    """
+    import os
+
+    if shell is None:
+        current = os.environ.get("SHELL", "")
+        if "zsh" in current:
+            shell = "zsh"
+        elif "fish" in current:
+            shell = "fish"
+        elif "bash" in current:
+            shell = "bash"
+        else:
+            click.echo(f"Could not detect shell from $SHELL={current!r}.")
+            click.echo("Please specify explicitly: engram completion bash|zsh|fish")
+            raise SystemExit(1)
+
+    config_path, snippet = _SHELL_CONFIGS[shell]
+
+    if shell == "fish":
+        # Fish completions go in a dedicated file, not appended to a profile
+        target = Path(config_path).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(snippet + "\n")
+        click.echo(f"Wrote fish completions to {target}")
+    else:
+        target = Path(config_path).expanduser()
+        # Check if already installed
+        if target.exists() and snippet in target.read_text():
+            click.echo(f"Engram completions already installed in {config_path}")
+            return
+        with target.open("a") as f:
+            f.write(f"\n# Engram shell completion\n{snippet}\n")
+        click.echo(f"Appended completion hook to {config_path}")
+
+    click.echo(f"Restart your shell or run: source {config_path}")
 
 
 if __name__ == "__main__":

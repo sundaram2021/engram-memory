@@ -32,9 +32,9 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 APP_URL = os.environ.get("ENGRAM_APP_URL", "https://www.engram-us.com")
 
 # ── Pricing constants ────────────────────────────────────────────────
-HOBBY_LIMIT_BYTES = 512 * 1024 * 1024          # 512 MiB (Neon free tier)
-PRICE_PER_GIB_MONTH = 0.1424                    # $0.1424/GiB-month (+20% over Neon)
-PRICE_PER_BYTE_MONTH = PRICE_PER_GIB_MONTH / (1024 ** 3)
+HOBBY_LIMIT_BYTES = 512 * 1024 * 1024  # 512 MiB (Neon free tier)
+PRICE_PER_GIB_MONTH = 0.1424  # $0.1424/GiB-month (+20% over Neon)
+PRICE_PER_BYTE_MONTH = PRICE_PER_GIB_MONTH / (1024**3)
 
 _pool: Any = None
 
@@ -62,7 +62,9 @@ def _get_jwt_from_request(request: Request) -> dict | None:
     token = request.cookies.get("engram_session")
     if not token:
         return None
-    secret = (os.environ.get("ENGRAM_JWT_SECRET") or "engram-dev-secret-change-in-production").encode()
+    secret = (
+        os.environ.get("ENGRAM_JWT_SECRET") or "engram-dev-secret-change-in-production"
+    ).encode()
     parts = token.split(".")
     if len(parts) != 3:
         return None
@@ -83,12 +85,14 @@ async def _user_owns_workspace(user_id: str, engram_id: str, pool: Any) -> bool:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT 1 FROM user_workspaces WHERE user_id = $1 AND engram_id = $2",
-            user_id, engram_id,
+            user_id,
+            engram_id,
         )
     return row is not None
 
 
 # ── Usage helpers ────────────────────────────────────────────────────
+
 
 def _monthly_charge_usd(storage_bytes: int) -> float:
     """Calculate monthly charge for storage above free tier."""
@@ -101,6 +105,7 @@ def _storage_pct(storage_bytes: int) -> float:
 
 
 # ── Handlers ─────────────────────────────────────────────────────────
+
 
 async def handle_status(request: Request) -> JSONResponse:
     session = _get_jwt_from_request(request)
@@ -129,18 +134,20 @@ async def handle_status(request: Request) -> JSONResponse:
 
     storage = ws["storage_bytes"] or 0
     charge = _monthly_charge_usd(storage)
-    return JSONResponse({
-        "engram_id": engram_id,
-        "plan": ws["plan"] or "hobby",
-        "paused": ws["paused"] or False,
-        "storage_bytes": storage,
-        "storage_mib": round(storage / (1024 * 1024), 2),
-        "hobby_limit_mib": 512,
-        "usage_pct": _storage_pct(storage),
-        "has_payment_method": bool(ws["stripe_customer_id"]),
-        "estimated_monthly_usd": charge,
-        "price_per_gib_month": PRICE_PER_GIB_MONTH,
-    })
+    return JSONResponse(
+        {
+            "engram_id": engram_id,
+            "plan": ws["plan"] or "hobby",
+            "paused": ws["paused"] or False,
+            "storage_bytes": storage,
+            "storage_mib": round(storage / (1024 * 1024), 2),
+            "hobby_limit_mib": 512,
+            "usage_pct": _storage_pct(storage),
+            "has_payment_method": bool(ws["stripe_customer_id"]),
+            "estimated_monthly_usd": charge,
+            "price_per_gib_month": PRICE_PER_GIB_MONTH,
+        }
+    )
 
 
 async def handle_checkout(request: Request) -> JSONResponse:
@@ -177,6 +184,7 @@ async def handle_checkout(request: Request) -> JSONResponse:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
     import stripe
+
     stripe.api_key = STRIPE_SECRET_KEY
 
     # Reuse or create Stripe customer
@@ -191,11 +199,13 @@ async def handle_checkout(request: Request) -> JSONResponse:
         async with pool.acquire() as conn:
             await conn.execute(
                 "UPDATE users SET stripe_customer_id = $1 WHERE id = $2",
-                customer_id, session["sub"],
+                customer_id,
+                session["sub"],
             )
             await conn.execute(
                 "UPDATE workspaces SET stripe_customer_id = $1 WHERE engram_id = $2",
-                customer_id, engram_id,
+                customer_id,
+                engram_id,
             )
 
     checkout_session = stripe.checkout.Session.create(
@@ -239,6 +249,7 @@ async def handle_portal(request: Request) -> JSONResponse:
         return JSONResponse({"error": "No payment method on file"}, status_code=404)
 
     import stripe
+
     stripe.api_key = STRIPE_SECRET_KEY
 
     portal = stripe.billing_portal.Session.create(
@@ -257,6 +268,7 @@ async def handle_webhook(request: Request) -> Response:
     sig_header = request.headers.get("stripe-signature", "")
 
     import stripe
+
     stripe.api_key = STRIPE_SECRET_KEY
 
     try:
@@ -278,7 +290,8 @@ async def handle_webhook(request: Request) -> Response:
                         """UPDATE workspaces
                            SET paused = false, stripe_customer_id = $1, plan = 'pro'
                            WHERE engram_id = $2""",
-                        customer_id, engram_id,
+                        customer_id,
+                        engram_id,
                     )
             except Exception:
                 pass  # Log in production
@@ -296,7 +309,8 @@ async def handle_webhook(request: Request) -> Response:
                             """UPDATE workspaces
                                SET paused = false, stripe_customer_id = $1, plan = 'pro'
                                WHERE engram_id = $2""",
-                            customer_id, engram_id,
+                            customer_id,
+                            engram_id,
                         )
                 except Exception:
                     pass
@@ -305,18 +319,22 @@ async def handle_webhook(request: Request) -> Response:
 
 
 async def handle_options(request: Request) -> Response:
-    return Response(headers={
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-    })
+    return Response(
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+        }
+    )
 
 
-app = Starlette(routes=[
-    Route("/billing/status",   handle_status,   methods=["GET"]),
-    Route("/billing/checkout", handle_checkout, methods=["POST"]),
-    Route("/billing/portal",   handle_portal,   methods=["GET"]),
-    Route("/billing/webhook",  handle_webhook,  methods=["POST"]),
-    Route("/stripe/webhook",   handle_webhook,  methods=["POST"]),  # canonical Stripe URL
-    Route("/billing/{path:path}", handle_options, methods=["OPTIONS"]),
-])
+app = Starlette(
+    routes=[
+        Route("/billing/status", handle_status, methods=["GET"]),
+        Route("/billing/checkout", handle_checkout, methods=["POST"]),
+        Route("/billing/portal", handle_portal, methods=["GET"]),
+        Route("/billing/webhook", handle_webhook, methods=["POST"]),
+        Route("/stripe/webhook", handle_webhook, methods=["POST"]),  # canonical Stripe URL
+        Route("/billing/{path:path}", handle_options, methods=["OPTIONS"]),
+    ]
+)

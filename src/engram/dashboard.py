@@ -8,16 +8,15 @@ point-in-time, expiring facts.
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from engram.engine import EngramEngine
+    pass
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import HTMLResponse, Response
 from starlette.routing import Route
 
 from engram.storage import Storage
@@ -432,14 +431,14 @@ def _dash_layout(title: str, body: str, active: str = "", dark_mode: bool = Fals
         return ' class="active"' if name == active else ""
 
     theme_class = "dark" if dark_mode else ""
-    theme_script = f"""
+    theme_script = """
     <script>
-      (function() {{
+      (function() {
         const saved = localStorage.getItem('engram-theme');
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         const isDark = saved === 'dark' || (!saved && prefersDark);
         if (isDark) document.documentElement.classList.add('dark');
-      }})();
+      })();
     </script>"""
 
     return f"""<!DOCTYPE html>
@@ -1010,7 +1009,6 @@ def _render_settings(workspace_info: dict | None) -> str:
     schema = workspace_info.get("schema", "engram")
     anonymous_mode = workspace_info.get("anonymous_mode", False)
     anon_agents = workspace_info.get("anon_agents", False)
-    is_creator = workspace_info.get("is_creator", False)
     invite_keys = workspace_info.get("invite_keys", [])
 
     # Render invite keys

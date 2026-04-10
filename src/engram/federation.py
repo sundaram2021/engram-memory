@@ -55,7 +55,8 @@ class FederationClient:
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
 
-        async with aiohttp.ClientSession() as session:
+        timeout = aiohttp.ClientTimeout(total=30, connect=5)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url, params=params, headers=headers) as resp:
                 if resp.status != 200:
                     text = await resp.text()
@@ -79,7 +80,9 @@ class FederationClient:
 
         logger.info(
             "Federation sync: fetched=%d ingested=%d duplicates=%d",
-            len(facts), ingested, duplicates,
+            len(facts),
+            ingested,
+            duplicates,
         )
         return {
             "fetched": len(facts),
@@ -103,8 +106,10 @@ def build_federation_routes(storage: Storage) -> Any:
         if not after:
             return JSONResponse({"error": "Missing 'after' parameter"}, status_code=400)
         scope = request.query_params.get("scope")
-        limit = int(request.query_params.get("limit", "1000"))
-        limit = min(limit, 5000)
+        try:
+            limit = max(1, min(int(request.query_params.get("limit", "1000")), 5000))
+        except (TypeError, ValueError):
+            limit = 1000
 
         facts = await storage.get_facts_since(after, scope_prefix=scope, limit=limit)
         # Strip binary embedding from response (too large for JSON)

@@ -5,9 +5,8 @@ This file provides universal guidance for any AI assistant working on the Engram
 ## Quick Start
 
 ```bash
-cd /home/ismaeldev/Engram
-source .venv/bin/activate
-pytest tests/ -x
+uv sync            # Install dependencies
+pytest tests/ -x   # Run tests
 ```
 
 ## Project Context
@@ -37,7 +36,6 @@ pytest tests/ -x
 ## Running the Server
 
 ```bash
-cd /home/ismaeldev/Engram
 python -m engram.cli serve --http
 # Dashboard at http://localhost:7474/dashboard
 ```

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import datetime, timezone
 
@@ -39,26 +38,28 @@ async def test_dashboard_counts(storage: Storage):
     assert await storage.count_conflicts() == 0
 
     now = datetime.now(timezone.utc).isoformat()
-    await storage.insert_fact({
-        "id": uuid.uuid4().hex,
-        "lineage_id": uuid.uuid4().hex,
-        "content": "test",
-        "content_hash": "h1",
-        "scope": "test",
-        "confidence": 0.9,
-        "fact_type": "observation",
-        "agent_id": "a1",
-        "engineer": None,
-        "provenance": None,
-        "keywords": "[]",
-        "entities": "[]",
-        "artifact_hash": None,
-        "embedding": None,
-        "embedding_model": "test",
-        "embedding_ver": "1.0",
-        "committed_at": now,
-        "valid_from": now,
-        "valid_until": None,
-        "ttl_days": None,
-    })
+    await storage.insert_fact(
+        {
+            "id": uuid.uuid4().hex,
+            "lineage_id": uuid.uuid4().hex,
+            "content": "test",
+            "content_hash": "h1",
+            "scope": "test",
+            "confidence": 0.9,
+            "fact_type": "observation",
+            "agent_id": "a1",
+            "engineer": None,
+            "provenance": None,
+            "keywords": "[]",
+            "entities": "[]",
+            "artifact_hash": None,
+            "embedding": None,
+            "embedding_model": "test",
+            "embedding_ver": "1.0",
+            "committed_at": now,
+            "valid_from": now,
+            "valid_until": None,
+            "ttl_days": None,
+        }
+    )
     assert await storage.count_facts() == 1

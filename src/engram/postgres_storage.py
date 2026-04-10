@@ -189,6 +189,14 @@ class PostgresStorage(BaseStorage):
 
     # ── Query operations ─────────────────────────────────────────────
 
+    async def get_distinct_scopes(self) -> list[str]:
+        """Return all unique scope values for the workspace."""
+        rows = await self.pool.fetch(
+            "SELECT DISTINCT scope FROM facts WHERE workspace_id = $1 AND valid_until IS NULL",
+            self.workspace_id,
+        )
+        return [r["scope"] for r in rows]
+
     async def get_current_facts_in_scope(
         self,
         scope: str | None = None,
@@ -252,9 +260,13 @@ class PostgresStorage(BaseStorage):
         """In PostgreSQL mode rowids are actually fact IDs (strings) from fts_search."""
         if not rowids:
             return []
-        placeholders = ", ".join(f"${i + 1}" for i in range(len(rowids)))
+        placeholders = ", ".join(f"${i + 2}" for i in range(len(rowids)))
         async with self.acquire() as conn:
-            rows = await conn.fetch(f"SELECT * FROM facts WHERE id IN ({placeholders})", *rowids)
+            rows = await conn.fetch(
+                f"SELECT * FROM facts WHERE workspace_id = $1 AND id IN ({placeholders})",
+                self.workspace_id,
+                *rowids,
+            )
         return [_row_to_dict(r) for r in rows]
 
     async def get_fact_by_id(self, fact_id: str) -> dict | None:
@@ -265,6 +277,34 @@ class PostgresStorage(BaseStorage):
                 self.workspace_id,
             )
         return _row_to_dict(row) if row else None
+
+    async def get_facts_by_ids(self, ids: list[str]) -> dict[str, dict]:
+        """Batch-fetch multiple facts by ID in a single query. Returns {id: fact_row}."""
+        if not ids:
+            return {}
+        placeholders = ", ".join(f"${i + 2}" for i in range(len(ids)))
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM facts WHERE workspace_id = $1 AND id IN ({placeholders})",
+                self.workspace_id,
+                *ids,
+            )
+        return {r["id"]: _row_to_dict(r) for r in rows}
+
+    async def get_conflicting_fact_ids(self, fact_id: str) -> set[str]:
+        """Return all fact IDs that already have any conflict (any status) with fact_id."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT fact_a_id, fact_b_id FROM conflicts "
+                "WHERE workspace_id = $1 AND (fact_a_id = $2 OR fact_b_id = $2)",
+                self.workspace_id,
+                fact_id,
+            )
+        result: set[str] = set()
+        for r in rows:
+            other = r["fact_b_id"] if r["fact_a_id"] == fact_id else r["fact_a_id"]
+            result.add(other)
+        return result
 
     async def promote_fact(self, fact_id: str) -> bool:
         """Promote an ephemeral fact to durable. Returns True if promoted."""
@@ -540,7 +580,7 @@ class PostgresStorage(BaseStorage):
         async with self.acquire() as conn:
             result = await conn.execute(
                 "UPDATE conflicts SET status=$1, resolution_type=$2, resolution=$3, "
-                "resolved_by=$4, resolved_at=$5, auto_resolved=1, escalated_at=$6 "
+                "resolved_by=$4, resolved_at=$5, auto_resolved=TRUE, escalated_at=$6 "
                 "WHERE id=$7 AND status='open' AND workspace_id=$8",
                 new_status,
                 resolution_type,
@@ -860,6 +900,120 @@ class PostgresStorage(BaseStorage):
                 self.workspace_id,
             )
 
+    async def get_workspace_stats(self) -> dict:
+        """Return aggregate workspace statistics (Postgres implementation)."""
+        ws = self.workspace_id
+        async with self.pool.acquire() as conn:
+            # facts totals
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) AS total, "
+                "SUM(CASE WHEN valid_until IS NULL THEN 1 ELSE 0 END) AS current_count "
+                "FROM facts WHERE workspace_id = $1",
+                ws,
+            )
+            total_facts = row["total"] or 0
+            current_facts = row["current_count"] or 0
+
+            # by scope (top 10)
+            scope_rows = await conn.fetch(
+                "SELECT scope, COUNT(*) AS cnt FROM facts "
+                "WHERE valid_until IS NULL AND workspace_id = $1 "
+                "GROUP BY scope ORDER BY cnt DESC LIMIT 10",
+                ws,
+            )
+            by_scope = {r["scope"]: r["cnt"] for r in scope_rows}
+
+            # by type
+            type_rows = await conn.fetch(
+                "SELECT fact_type, COUNT(*) AS cnt FROM facts "
+                "WHERE valid_until IS NULL AND workspace_id = $1 GROUP BY fact_type",
+                ws,
+            )
+            by_type = {r["fact_type"]: r["cnt"] for r in type_rows}
+
+            # by durability
+            dur_rows = await conn.fetch(
+                "SELECT durability, COUNT(*) AS cnt FROM facts "
+                "WHERE valid_until IS NULL AND workspace_id = $1 GROUP BY durability",
+                ws,
+            )
+            by_durability = {r["durability"]: r["cnt"] for r in dur_rows}
+
+            # expiring soon (within 7 days)
+            exp_row = await conn.fetchrow(
+                "SELECT COUNT(*) AS cnt FROM facts "
+                "WHERE ttl_days IS NOT NULL AND valid_until IS NULL AND workspace_id = $1 "
+                "AND valid_from + (ttl_days * INTERVAL '1 day') < NOW() + INTERVAL '7 days'",
+                ws,
+            )
+            expiring_soon = exp_row["cnt"] or 0
+
+            # conflicts by status
+            conflict_rows = await conn.fetch(
+                "SELECT status, COUNT(*) AS cnt FROM conflicts "
+                "WHERE workspace_id = $1 GROUP BY status",
+                ws,
+            )
+            conflict_by_status: dict[str, int] = {r["status"]: r["cnt"] for r in conflict_rows}
+
+            # conflicts by tier
+            tier_rows = await conn.fetch(
+                "SELECT detection_tier, COUNT(*) AS cnt FROM conflicts "
+                "WHERE workspace_id = $1 GROUP BY detection_tier",
+                ws,
+            )
+            conflict_by_tier = {r["detection_tier"]: r["cnt"] for r in tier_rows}
+
+            # agents
+            agent_rows = await conn.fetch(
+                "SELECT agent_id, total_commits, flagged_commits FROM agents "
+                "WHERE workspace_id = $1 ORDER BY total_commits DESC",
+                ws,
+            )
+            total_agents = len(agent_rows)
+            most_active = agent_rows[0]["agent_id"] if agent_rows else None
+            trust_scores = [
+                1.0 - (r["flagged_commits"] / r["total_commits"]) if r["total_commits"] > 0 else 0.8
+                for r in agent_rows
+            ]
+            avg_trust = round(sum(trust_scores) / len(trust_scores), 3) if trust_scores else None
+
+            # detection feedback
+            fb_rows = await conn.fetch(
+                "SELECT df.feedback, COUNT(*) AS cnt FROM detection_feedback df "
+                "JOIN conflicts c ON df.conflict_id = c.id "
+                "WHERE c.workspace_id = $1 GROUP BY df.feedback",
+                ws,
+            )
+            feedback = {r["feedback"]: r["cnt"] for r in fb_rows}
+
+        return {
+            "facts": {
+                "total": total_facts,
+                "current": current_facts,
+                "expiring_soon": expiring_soon,
+                "by_scope": by_scope,
+                "by_type": by_type,
+                "by_durability": by_durability,
+            },
+            "conflicts": {
+                "open": conflict_by_status.get("open", 0),
+                "resolved": conflict_by_status.get("resolved", 0),
+                "dismissed": conflict_by_status.get("dismissed", 0),
+                "total": sum(conflict_by_status.values()),
+                "by_tier": conflict_by_tier,
+            },
+            "agents": {
+                "total": total_agents,
+                "most_active": most_active,
+                "avg_trust_score": avg_trust,
+            },
+            "detection": {
+                "true_positives": feedback.get("true_positive", 0),
+                "false_positives": feedback.get("false_positive", 0),
+            },
+        }
+
     # ── Workspace / invite key methods ───────────────────────────────
 
     async def ensure_workspace(
@@ -909,13 +1063,17 @@ class PostgresStorage(BaseStorage):
             )
         return _row_to_dict(row) if row else None
 
-    async def consume_invite_key(self, key_hash: str) -> None:
-        async with self.acquire() as conn:
-            await conn.execute(
+    async def consume_invite_key(self, key_hash: str) -> dict | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
                 "UPDATE invite_keys SET uses_remaining = uses_remaining - 1 "
-                "WHERE key_hash = $1 AND uses_remaining IS NOT NULL",
+                "WHERE key_hash = $1 "
+                "AND (expires_at IS NULL OR expires_at > NOW()) "
+                "AND (uses_remaining IS NULL OR uses_remaining > 0) "
+                "RETURNING *",
                 key_hash,
             )
+        return _row_to_dict(row) if row else None
 
     async def get_key_generation(self, engram_id: str) -> int:
         async with self.acquire() as conn:
