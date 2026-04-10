@@ -216,6 +216,8 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
                 "anonymous_mode": ws.anonymous_mode,
                 "anon_agents": ws.anon_agents,
                 "is_creator": ws.is_creator,
+                "display_name": ws.display_name,
+                "description": ws.description,
             }
 
             # Get invite keys from storage
@@ -461,7 +463,9 @@ _DASH_STYLE = """
 """
 
 
-def _dash_layout(title: str, body: str, active: str = "", dark_mode: bool = False) -> str:
+def _dash_layout(
+    title: str, body: str, active: str = "", dark_mode: bool = False, workspace_name: str = ""
+) -> str:
     def _nav_cls(name: str) -> str:
         return ' class="active"' if name == active else ""
 
@@ -475,6 +479,12 @@ def _dash_layout(title: str, body: str, active: str = "", dark_mode: bool = Fals
         if (isDark) document.documentElement.classList.add('dark');
       })();
     </script>"""
+
+    display_name_html = (
+        f'<span style="font-weight:400;opacity:0.7;">— {workspace_name}</span>'
+        if workspace_name
+        else ""
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -494,7 +504,7 @@ def _dash_layout(title: str, body: str, active: str = "", dark_mode: bool = Fals
     <div class="dash-header">
       <div class="dash-title">
         <div class="dot"></div>
-        <h1>Engram Dashboard</h1>
+        <h1>Engram Dashboard{display_name_html}</h1>
       </div>
       <div style="display:flex;gap:1rem;align-items:center;">
         <button onclick="toggleTheme()" class="theme-toggle" title="Toggle dark mode">
@@ -648,7 +658,7 @@ def _render_index(
       {"".join(_agent_row(a) for a in agents[:10])}
     </table>
     </div>"""
-    return _dash_layout("Overview", body, active="overview")
+    return _dash_layout("Overview", body, active="overview", workspace_name=_get_workspace_name())
 
 
 def _agent_row(a: dict) -> str:
@@ -714,7 +724,9 @@ def _render_facts_table(facts: list[dict], conflict_ids: set[str], search_query:
     </table>
     </div>
     <p class="count-note">{len(facts)} fact(s)</p>"""
-    return _dash_layout("Knowledge Base", body, active="facts")
+    return _dash_layout(
+        "Knowledge Base", body, active="facts", workspace_name=_get_workspace_name()
+    )
 
 
 def _render_conflicts_page(conflicts: list[dict]) -> str:
@@ -743,7 +755,7 @@ def _render_conflicts_page(conflicts: list[dict]) -> str:
       <span><kbd>b</kbd> accept fact B</span>
       <span><kbd>s</kbd> skip</span>
     </div>"""
-    return _dash_layout("Conflicts", body, active="conflicts")
+    return _dash_layout("Conflicts", body, active="conflicts", workspace_name=_get_workspace_name())
 
 
 def _render_conflict_card(c: dict) -> str:
@@ -959,7 +971,7 @@ def _render_timeline(facts: list[dict]) -> str:
       {"".join(rows)}
     </table>
     </div>"""
-    return _dash_layout("Timeline", body, active="timeline")
+    return _dash_layout("Timeline", body, active="timeline", workspace_name=_get_workspace_name())
 
 
 def _render_agents(agents: list[dict], feedback: dict[str, int]) -> str:
@@ -1000,7 +1012,7 @@ def _render_agents(agents: list[dict], feedback: dict[str, int]) -> str:
       {"".join(rows)}
     </table>
     </div>"""
-    return _dash_layout("Agents", body, active="agents")
+    return _dash_layout("Agents", body, active="agents", workspace_name=_get_workspace_name())
 
 
 def _render_expiring(facts: list[dict], days: int) -> str:
@@ -1027,7 +1039,9 @@ def _render_expiring(facts: list[dict], days: int) -> str:
     </table>
     </div>
     <p class="count-note">{len(facts)} fact(s) expiring within {days} day(s)</p>"""
-    return _dash_layout("Expiring Facts", body, active="expiring")
+    return _dash_layout(
+        "Expiring Facts", body, active="expiring", workspace_name=_get_workspace_name()
+    )
 
 
 def _render_settings(workspace_info: dict | None) -> str:
@@ -1038,7 +1052,9 @@ def _render_settings(workspace_info: dict | None) -> str:
             <p>No workspace configured.</p>
             <p>Run <code>engram setup</code> or <code>engram init</code> to create a workspace.</p>
         </div>"""
-        return _dash_layout("Settings", body, active="settings")
+        return _dash_layout(
+            "Settings", body, active="settings", workspace_name=_get_workspace_name()
+        )
 
     engram_id = workspace_info.get("engram_id", "Unknown")
     schema = workspace_info.get("schema", "engram")
@@ -1072,8 +1088,21 @@ def _render_settings(workspace_info: dict | None) -> str:
     else:
         invite_keys_html = "<p style='color:#6b7280;'>No invite keys found.</p>"
 
+    display_name = workspace_info.get("display_name", "")
+    description = workspace_info.get("description", "")
+
     body = f"""
     <h2>Workspace Settings</h2>
+    
+    <div style="margin-bottom:2rem;">
+        <h3 style="font-size:1rem;color:#374151;margin-bottom:0.5rem;">Display Name</h3>
+        <code style="background:#f3f4f6;padding:0.5rem;border-radius:4px;">{_esc(display_name) or "(not set)"}</code>
+    </div>
+    
+    <div style="margin-bottom:2rem;">
+        <h3 style="font-size:1rem;color:#374151;margin-bottom:0.5rem;">Description</h3>
+        <code style="background:#f3f4f6;padding:0.5rem;border-radius:4px;">{_esc(description) or "(not set)"}</code>
+    </div>
     
     <div style="margin-bottom:2rem;">
         <h3 style="font-size:1rem;color:#374151;margin-bottom:0.5rem;">Workspace ID</h3>
@@ -1112,7 +1141,20 @@ def _render_settings(workspace_info: dict | None) -> str:
         <button class="btn-dismiss" style="background:#fee2e2;color:#dc2626;border-color:#fecaca;">Delete Workspace</button>
     </div>"""
 
-    return _dash_layout("Settings", body, active="settings")
+    return _dash_layout("Settings", body, active="settings", workspace_name=_get_workspace_name())
+
+
+def _get_workspace_name() -> str:
+    """Get the workspace display name for header."""
+    try:
+        from engram.workspace import read_workspace
+
+        ws = read_workspace()
+        if ws and ws.display_name:
+            return ws.display_name
+    except Exception:
+        pass
+    return ""
 
 
 def _esc(s: Any) -> str:

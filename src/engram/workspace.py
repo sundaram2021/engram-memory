@@ -26,16 +26,14 @@ WORKSPACE_PATH = Path.home() / ".engram" / "workspace.json"
 @dataclass
 class WorkspaceConfig:
     engram_id: str
-    db_url: str  # empty string = local SQLite mode
-    schema: str = "engram"  # PostgreSQL schema name for Engram tables
-    anonymous_mode: bool = False  # strip engineer field on every INSERT
-    anon_agents: bool = False  # randomize agent_id each session
-    key_generation: int = 0  # must match DB key_generation; mismatch = disconnected
-    is_creator: bool = False  # True only for the agent who ran engram_init
-    display_name: str = ""  # human-readable name for the workspace
-    display_name: str = ""  # optional user-facing display name
-    key_generation: int = 0  # must match DB key_generation; mismatch = disconnected
-    is_creator: bool = False  # True only for the agent who ran engram_init
+    db_url: str
+    schema: str = "engram"
+    anonymous_mode: bool = False
+    anon_agents: bool = False
+    key_generation: int = 0
+    is_creator: bool = False
+    display_name: str = ""
+    description: str = ""
 
 
 def read_workspace() -> WorkspaceConfig | None:
@@ -52,6 +50,8 @@ def read_workspace() -> WorkspaceConfig | None:
                 data["is_creator"] = False
             if "display_name" not in data:
                 data["display_name"] = ""
+            if "description" not in data:
+                data["description"] = ""
             return WorkspaceConfig(**data)
         except Exception:
             return None
@@ -71,7 +71,7 @@ def write_workspace(config: WorkspaceConfig) -> None:
     WORKSPACE_PATH.chmod(0o600)
 
 
-EDITABLE_CONFIG_KEYS = {"anonymous_mode", "anon_agents", "display_name"}
+EDITABLE_CONFIG_KEYS = {"anonymous_mode", "anon_agents", "display_name", "description"}
 
 
 def workspace_settings_dict(config: WorkspaceConfig) -> dict[str, Any]:
@@ -80,6 +80,7 @@ def workspace_settings_dict(config: WorkspaceConfig) -> dict[str, Any]:
         "anonymous_mode": config.anonymous_mode,
         "anon_agents": config.anon_agents,
         "display_name": config.display_name,
+        "description": config.description,
     }
 
 
@@ -116,10 +117,10 @@ def parse_config_value(key: str, raw_value: str) -> Any:
         return _parse_bool(raw_value)
 
     if key == "display_name":
-        value = raw_value.strip()
-        if not value:
-            raise ValueError("display_name cannot be empty")
-        return value
+        return raw_value.strip()
+
+    if key == "description":
+        return raw_value.strip()
 
     raise ValueError(f"Unsupported config key: {key}")
 
