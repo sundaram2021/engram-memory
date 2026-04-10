@@ -10,7 +10,7 @@ Two schemas are maintained:
 - POSTGRES_SCHEMA_SQL: PostgreSQL (team mode, asyncpg)
 """
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # Incremental ALTER TABLE migrations keyed by target version.
 MIGRATIONS: dict[int, list[str]] = {
@@ -113,6 +113,11 @@ MIGRATIONS: dict[int, list[str]] = {
             timestamp    TEXT NOT NULL,
             workspace_id TEXT NOT NULL DEFAULT 'local'
         )""",
+    ],
+    9: [
+        # Workspace display name and description (issue #64)
+        "ALTER TABLE workspaces ADD COLUMN display_name TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE workspaces ADD COLUMN description TEXT NOT NULL DEFAULT ''",
     ],
 }
 
@@ -240,7 +245,9 @@ CREATE TABLE IF NOT EXISTS workspaces (
     created_at       TEXT NOT NULL,
     anonymous_mode   INTEGER NOT NULL DEFAULT 0,
     anon_agents      INTEGER NOT NULL DEFAULT 0,
-    key_generation   INTEGER NOT NULL DEFAULT 0
+    key_generation   INTEGER NOT NULL DEFAULT 0,
+    display_name     TEXT NOT NULL DEFAULT '',
+    description      TEXT NOT NULL DEFAULT ''
 );
 
 -- Invite keys (db_url is encrypted into the key token, NOT stored here)
@@ -442,7 +449,9 @@ CREATE TABLE IF NOT EXISTS workspaces (
     created_at       TIMESTAMPTZ NOT NULL,
     anonymous_mode   BOOLEAN NOT NULL DEFAULT FALSE,
     anon_agents      BOOLEAN NOT NULL DEFAULT FALSE,
-    key_generation   INTEGER NOT NULL DEFAULT 0
+    key_generation   INTEGER NOT NULL DEFAULT 0,
+    display_name     TEXT NOT NULL DEFAULT '',
+    description      TEXT NOT NULL DEFAULT ''
 );
 
 -- Invite keys (db_url encrypted into token, NOT stored here)

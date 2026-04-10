@@ -375,6 +375,68 @@ async def engram_join(invite_key: str) -> dict[str, Any]:
     }
 
 
+# ── engram_rename ────────────────────────────────────────────────────
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
+async def engram_rename(
+    display_name: str = "",
+    description: str = "",
+) -> dict[str, Any]:
+    """Set or update the workspace display name and description (issue #64).
+
+    Workspaces are identified by UUID (engram_id). This tool allows setting
+    a human-readable name like "Acme Payments Team" and optional description.
+
+    Parameters:
+    - display_name: Human-readable workspace name (e.g., "Engineering Team").
+      Set to empty string to clear.
+    - description: Optional description of the workspace purpose.
+
+    Returns: {status, display_name, description, next_prompt}
+
+    Example: {"status": "updated", "display_name": "Engineering Team"}
+    """
+    from engram.workspace import read_workspace, set_workspace_setting
+
+    ws = read_workspace()
+    if ws is None:
+        return {
+            "status": "error",
+            "next_prompt": "No workspace configured. Run engram init or engram join first.",
+        }
+
+    errors = []
+    if "display_name" in (ws and str(ws)) or display_name:
+        try:
+            set_workspace_setting("display_name", display_name)
+        except ValueError as e:
+            errors.append(str(e))
+
+    if description:
+        try:
+            set_workspace_setting("description", description)
+        except ValueError as e:
+            errors.append(str(e))
+
+    if errors:
+        return {
+            "status": "error",
+            "next_prompt": f"Failed to update workspace: {'; '.join(errors)}",
+        }
+
+    updated = read_workspace()
+    return {
+        "status": "updated",
+        "display_name": updated.display_name if updated else display_name,
+        "description": updated.description if updated else description,
+        "next_prompt": (
+            f"Workspace updated: {display_name or '(unnamed)'}\n"
+            f"Description: {description or 'None'}"
+        ),
+    }
+
+
 # ── engram_reset_invite_key ──────────────────────────────────────────
 
 
