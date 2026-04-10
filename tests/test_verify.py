@@ -6,16 +6,16 @@ from pathlib import Path
 from unittest.mock import patch
 from click.testing import CliRunner
 
-from engram.cli import main, _MCP_CLIENTS
+from engram.cli import main, _AGENT_CLIENTS
 
 
 _REAL_HOME = Path.home()
 
 
-def _rebased_mcp_clients(home: Path) -> dict:
-    """Rebuild _MCP_CLIENTS with paths rooted under *home*."""
+def _rebased_agent_clients(home: Path) -> dict:
+    """Rebuild _AGENT_CLIENTS with paths rooted under *home*."""
     rebuilt = {}
-    for name, cfg in _MCP_CLIENTS.items():
+    for name, cfg in _AGENT_CLIENTS.items():
         new_cfg = dict(cfg)
         try:
             relative = cfg["path"].relative_to(_REAL_HOME)
@@ -41,7 +41,7 @@ class TestVerifyCommand:
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
             patch("engram.workspace.WORKSPACE_PATH", workspace_path),
-            patch("engram.cli._MCP_CLIENTS", _rebased_mcp_clients(tmp_path)),
+            patch("engram.cli._AGENT_CLIENTS", _rebased_agent_clients(tmp_path)),
         ):
             yield tmp_path
 
@@ -237,7 +237,7 @@ class TestVerifyMCPClientDetection:
         with (
             patch("pathlib.Path.home", return_value=tmp_path),
             patch("engram.workspace.WORKSPACE_PATH", workspace_path),
-            patch("engram.cli._MCP_CLIENTS", _rebased_mcp_clients(tmp_path)),
+            patch("engram.cli._AGENT_CLIENTS", _rebased_agent_clients(tmp_path)),
         ):
             yield tmp_path
 

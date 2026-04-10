@@ -13,15 +13,21 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import platform as _platform
 import sys
 from pathlib import Path
+import os
+import platform as _platform
 
 import click
 
 from engram import embeddings
 from engram.storage import DEFAULT_DB_PATH
 
+_DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
+_PATH_SYSTEM_HOME = Path.home()
+_PATH_APPDATA_DIR = Path(os.environ["APPDATA"]) if "APPDATA" in os.environ else None
+_PATH_APPSUPPORT_DIR = _PATH_SYSTEM_HOME / "Library" / "Application Support"  # Mac only
+_PATH_XDG_DIR = Path(os.environ["XDG_CONFIG_HOME"]) if "XDG_CONFIG_HOME" in os.environ else None
 
 @click.group()
 def main() -> None:
@@ -31,259 +37,34 @@ def main() -> None:
 
 # ── engram install ───────────────────────────────────────────────────
 
+# Read in the list of known client config locations and get their appropriate
+# config file (different systems have them in different places).
 
-# Known MCP client config locations and the JSON path to mcpServers.
-# Comprehensive list covering all known MCP-compatible IDEs, editors, CLI
-# tools, and desktop apps that store their config in a discoverable file.
-# Entries are grouped by category for readability.
-
-
-def _xdg_config() -> Path:
-    """Return XDG_CONFIG_HOME or its default."""
-    import os
-
-    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-
-
-def _app_support() -> Path:
-    """macOS ~/Library/Application Support."""
-    return Path.home() / "Library" / "Application Support"
-
-
-def _appdata() -> Path:
-    """Windows %APPDATA% (falls back to ~/.config on non-Windows)."""
-    import os
-
-    return Path(os.environ.get("APPDATA", Path.home() / ".config"))
-
-
-_IS_MAC = _platform.system() == "Darwin"
-_IS_WIN = _platform.system() == "Windows"
-
-_MCP_CLIENTS: dict[str, dict] = {
-    # ── Anthropic ────────────────────────────────────────────────────
-    "Claude Code": {
-        "path": Path.home() / ".claude" / "settings.json",
-        "key": "mcpServers",
-    },
-    "Claude Desktop": {
-        "path": (
-            _app_support() / "Claude" / "claude_desktop_config.json"
-            if _IS_MAC
-            else _appdata() / "Claude" / "claude_desktop_config.json"
-        ),
-        "key": "mcpServers",
-    },
-    # ── VS Code family ──────────────────────────────────────────────
-    "VS Code (Copilot)": {
-        "path": Path.home() / ".vscode" / "mcp.json",
-        "key": "mcpServers",
-    },
-    "VS Code Insiders (Copilot)": {
-        "path": Path.home() / ".vscode-insiders" / "mcp.json",
-        "key": "mcpServers",
-    },
-    "Cline (VS Code)": {
-        "path": Path.home()
-        / ".vscode"
-        / "globalStorage"
-        / "saoudrizwan.claude-dev"
-        / "settings"
-        / "cline_mcp_settings.json",
-        "key": "mcpServers",
-    },
-    "Cline (VS Code Insiders)": {
-        "path": Path.home()
-        / ".vscode-insiders"
-        / "globalStorage"
-        / "saoudrizwan.claude-dev"
-        / "settings"
-        / "cline_mcp_settings.json",
-        "key": "mcpServers",
-    },
-    "Roo Code (VS Code)": {
-        "path": Path.home()
-        / ".vscode"
-        / "globalStorage"
-        / "rooveterinaryinc.roo-cline"
-        / "settings"
-        / "cline_mcp_settings.json",
-        "key": "mcpServers",
-    },
-    "Roo Code (VS Code Insiders)": {
-        "path": Path.home()
-        / ".vscode-insiders"
-        / "globalStorage"
-        / "rooveterinaryinc.roo-cline"
-        / "settings"
-        / "cline_mcp_settings.json",
-        "key": "mcpServers",
-    },
-    "Continue (VS Code)": {
-        "path": Path.home() / ".continue" / "config.json",
-        "key": "mcpServers",
-    },
-    "Sourcegraph Cody": {
-        "path": _xdg_config() / "cody" / "mcp_servers.json",
-        "key": "mcpServers",
-    },
-    # ── AI-native editors ───────────────────────────────────────────
-    "Cursor": {
-        "path": Path.home() / ".cursor" / "mcp.json",
-        "key": "mcpServers",
-    },
-    "Windsurf": {
-        "path": Path.home() / ".codeium" / "windsurf" / "mcp_config.json",
-        "key": "mcpServers",
-    },
-    "Trae": {
-        "path": Path.home() / ".trae" / "mcp.json",
-        "key": "mcpServers",
-    },
-    "Zed": {
-        "path": _xdg_config() / "zed" / "settings.json",
-        "key": "context_servers",  # Zed uses context_servers, not mcpServers
-    },
-    "Augment Code": {
-        "path": Path.home() / ".augment" / "mcp.json",
-        "key": "mcpServers",
-    },
-    # ── Kiro (Amazon) ───────────────────────────────────────────────
-    "Kiro": {
-        "path": Path.home() / ".kiro" / "settings" / "mcp.json",
-        "key": "mcpServers",
-    },
-    # ── JetBrains IDEs (shared config location) ─────────────────────
-    "IntelliJ IDEA": {
-        "path": Path.home() / ".idea" / "mcp.json",
-        "key": "mcpServers",
-    },
-    # ── CLI agents ──────────────────────────────────────────────────
-    "Codex": {
-        "path": Path.home() / ".codex" / "config.toml",
-        "key": "mcp_servers",  # TOML format
-        "format": "toml",
-    },
-    "Amazon Q Developer CLI": {
-        "path": Path.home() / ".aws" / "amazonq" / "mcp.json",
-        "key": "mcpServers",
-    },
-    "GitHub Copilot CLI": {
-        "path": Path.home() / ".copilot" / "mcp-config.json",
-        "key": "mcpServers",
-    },
-    "Gemini CLI": {
-        "path": Path.home() / ".gemini" / "settings.json",
-        "key": "mcpServers",
-    },
-    "OpenCode": {
-        "path": _xdg_config() / "opencode" / "opencode.json",
-        "key": "mcp",
-    },
-    "Devin CLI": {
-        "path": _xdg_config() / "devin" / "config.json",
-        "key": "mcpServers",
-    },
-    "Qwen Code": {
-        "path": Path.home() / ".qwen-code" / "settings.json",
-        "key": "mcpServers",
-    },
-    # ── Desktop chat apps ───────────────────────────────────────────
-    "Cherry Studio": {
-        "path": (
-            _app_support() / "CherryStudio" / "mcp.json"
-            if _IS_MAC
-            else _appdata() / "CherryStudio" / "mcp.json"
-        ),
-        "key": "mcpServers",
-    },
-    "ChatBox": {
-        "path": (
-            _app_support() / "xyz.chatboxapp.app" / "mcp.json"
-            if _IS_MAC
-            else _appdata() / "xyz.chatboxapp.app" / "mcp.json"
-        ),
-        "key": "mcpServers",
-    },
-    "msty": {
-        "path": (
-            _app_support() / "msty" / "mcp_config.json"
-            if _IS_MAC
-            else _appdata() / "msty" / "mcp_config.json"
-        ),
-        "key": "mcpServers",
-    },
-    "Dive": {
-        "path": (
-            _app_support() / "Dive" / "mcp_config.json"
-            if _IS_MAC
-            else _appdata() / "Dive" / "mcp_config.json"
-        ),
-        "key": "mcpServers",
-    },
-    "HyperChat": {
-        "path": (
-            _app_support() / "HyperChat" / "mcp_config.json"
-            if _IS_MAC
-            else _appdata() / "HyperChat" / "mcp_config.json"
-        ),
-        "key": "mcpServers",
-    },
-    "BoltAI": {
-        "path": (
-            _app_support() / "BoltAI" / "mcp_config.json"
-            if _IS_MAC
-            else _appdata() / "BoltAI" / "mcp_config.json"
-        ),
-        "key": "mcpServers",
-    },
-    "5ire": {
-        "path": (
-            _app_support() / "5ire" / "mcp_config.json"
-            if _IS_MAC
-            else _appdata() / "5ire" / "mcp_config.json"
-        ),
-        "key": "mcpServers",
-    },
-    # ── Neovim / Emacs ──────────────────────────────────────────────
-    "Neovim (mcphub.nvim)": {
-        "path": _xdg_config() / "mcphub" / "servers.json",
-        "key": "mcpServers",
-    },
-    "Emacs (mcp.el)": {
-        "path": Path.home() / ".emacs.d" / "mcp.json",
-        "key": "mcpServers",
-    },
-    # ── Terminal / Warp ─────────────────────────────────────────────
-    "Warp": {
-        "path": Path.home() / ".warp" / "mcp.json",
-        "key": "mcpServers",
-    },
-    # ── Theia IDE ───────────────────────────────────────────────────
-    "Theia IDE": {
-        "path": Path.home() / ".theia" / "mcp.json",
-        "key": "mcpServers",
-    },
-    # ── Refact.ai ───────────────────────────────────────────────────
-    "Refact.ai": {
-        "path": Path.home() / ".refact" / "mcp.json",
-        "key": "mcpServers",
-    },
-    # ── Aider ───────────────────────────────────────────────────────
-    "Aider": {
-        "path": Path.home() / ".aider" / "mcp.json",
-        "key": "mcpServers",
-    },
-    # ── Highlight AI ────────────────────────────────────────────────
-    "Highlight AI": {
-        "path": (
-            _app_support() / "Highlight" / "mcp.json"
-            if _IS_MAC
-            else _appdata() / "Highlight" / "mcp.json"
-        ),
-        "key": "mcpServers",
-    },
-}
+_AGENT_CLIENTS = {}
+with open(os.path.join(_DATA_DIR, 'cli-agent-clients.json'), 'r') as file:
+    agent_clients_json = json.load(file)
+    for key in agent_clients_json.keys():
+        _AGENT_CLIENTS[key] = {}
+        agent_config_path = agent_clients_json[key]['path']
+        if agent_clients_json[key]['config_path']['appdata'] and _PATH_APPDATA_DIR:
+            _AGENT_CLIENTS[key]['path'] = Path(
+                _PATH_APPDATA_DIR / agent_config_path
+            )
+        elif agent_clients_json[key]['config_path']['appsupport'] and _PATH_APPSUPPORT_DIR:
+            _AGENT_CLIENTS[key]['path'] = Path(
+                _PATH_APPSUPPORT_DIR / agent_config_path
+            )
+        elif agent_clients_json[key]['config_path']['xdg'] and _PATH_XDG_DIR:
+            _AGENT_CLIENTS[key]['path'] = Path(
+                _PATH_XDG_DIR / agent_config_path
+            )
+        elif agent_clients_json[key]['config_path']['syshome']:
+            _AGENT_CLIENTS[key]['path'] = Path(
+                _PATH_SYSTEM_HOME / agent_config_path
+            )
+        if 'path' not in _AGENT_CLIENTS[key]:
+            _AGENT_CLIENTS[key]['path'] = Path("ValidPathNotFound")
+        _AGENT_CLIENTS[key]['key'] = agent_clients_json[key]['server_type_key']
 
 _ENGRAM_MCP_ENTRY = {
     "command": "uvx",
@@ -386,7 +167,7 @@ def install(dry_run: bool) -> None:
     skipped = []
     steering_written = []
 
-    for client_name, info in _MCP_CLIENTS.items():
+    for client_name, info in _AGENT_CLIENTS.items():
         config_path: Path = info["path"]
         key: str = info["key"]
         fmt = info.get("format", "json")
@@ -1229,7 +1010,7 @@ def verify(verbose: bool) -> None:
     detected = []
     missing = []
 
-    for client_name, info in _MCP_CLIENTS.items():
+    for client_name, info in _AGENT_CLIENTS.items():
         config_path: Path = info["path"]
         try:
             if config_path.exists():
@@ -1498,7 +1279,7 @@ def setup(
         click.echo("[1/4] Detecting MCP clients...")
         # Reuse the install logic to detect clients
         added = []
-        for client_name, info in _MCP_CLIENTS.items():
+        for client_name, info in _AGENT_CLIENTS.items():
             config_path: Path = info["path"]
             if config_path.exists():
                 added.append(client_name)
