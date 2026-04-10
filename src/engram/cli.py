@@ -16,7 +16,6 @@ import logging
 import sys
 from pathlib import Path
 import os
-import platform as _platform
 
 import click
 
