@@ -51,6 +51,7 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
         resolved_conflicts = await storage.count_conflicts("resolved")
         agents = await storage.get_agents()
         expiring = await storage.get_expiring_facts(days_ahead=7)
+        recent_activity = await storage.get_fact_timeline(limit=10)
         return HTMLResponse(
             _render_index(
                 facts_count=facts_count,
@@ -60,6 +61,7 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
                 agents=agents,
                 expiring_count=len(expiring),
                 workspace_error=workspace_error,
+                recent_activity=recent_activity,
             )
         )
 
@@ -613,6 +615,7 @@ def _render_index(
     agents: list[dict],
     expiring_count: int,
     workspace_error: str | None = None,
+    recent_activity: list[dict] | None = None,
 ) -> str:
     # Show workspace error if present
     error_html = ""
@@ -685,12 +688,25 @@ def _render_index(
         <div class="stat-label">Expiring (7d)</div>
       </div>
     </div>
-    <h2>Recent Agents</h2>
-    <div class="table-wrap">
-    <table>
-      <tr><th>Agent</th><th>Engineer</th><th>Commits</th><th>Flagged</th><th>Last Seen</th></tr>
-      {"".join(_agent_row(a) for a in agents[:10])}
-    </table>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:1.5rem;">
+      <div>
+        <h2>Recent Activity</h2>
+        <div class="table-wrap">
+        <table>
+          <tr><th>Fact</th><th>Scope</th><th>When</th></tr>
+          {"".join(f"<tr><td class='content-cell'>{_esc(f.get('content', '')[:60])}</td><td>{_esc(f.get('scope', ''))}</td><td>{_esc(f.get('committed_at', '')[:16])}</td></tr>" for f in (recent_activity or [])[:10])}
+        </table>
+        </div>
+      </div>
+      <div>
+        <h2>Recent Agents</h2>
+        <div class="table-wrap">
+        <table>
+          <tr><th>Agent</th><th>Commits</th></tr>
+          {"".join(f"<tr><td>{_esc(a.get('agent_id', ''))}</td><td>{a.get('total_commits', 0)}</td></tr>" for a in agents[:5])}
+        </table>
+        </div>
+      </div>
     </div>"""
     return _dash_layout("Overview", body, active="overview", workspace_name=_get_workspace_name())
 
