@@ -128,10 +128,16 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
                 scope=scope, fact_type=fact_type, as_of=as_of, limit=limit, offset=0
             )
 
+        scopes = await storage.get_distinct_scopes()
         conflict_ids = await storage.get_open_conflict_fact_ids()
         return HTMLResponse(
             _render_facts_table(
-                facts, conflict_ids, search_query=search_query, offset=offset, limit=limit
+                facts,
+                conflict_ids,
+                search_query=search_query,
+                offset=offset,
+                limit=limit,
+                scopes=scopes,
             )
         )
 
@@ -697,6 +703,7 @@ def _render_facts_table(
     search_query: str = "",
     offset: int = 0,
     limit: int = 100,
+    scopes: list[str] | None = None,
 ) -> str:
     rows = []
     for f in facts:
@@ -737,12 +744,16 @@ def _render_facts_table(
           <a href="?q={_esc(search_query)}&offset={next_offset}&limit={limit}" class="btn-dismiss" {"style:pointer-events:none;opacity:0.5;" if len(facts) < limit else ""}>Next &rarr;</a>
         </div>"""
 
+    scope_options = ""
+    if scopes:
+        scope_options = "".join(f'<option value="{_esc(s)}">{_esc(s)}</option>' for s in scopes)
     body = f"""
     <h2>Knowledge Base</h2>
     <div class="filter-bar">
       <form method="get" action="/dashboard/facts" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
         <input type="text" name="q" placeholder="Search facts..." value="{_esc(search_query)}" style="min-width:200px;">
-        <input name="scope" placeholder="Scope filter" value="">
+        <input name="scope" placeholder="Scope filter" value="" list="scopes-list">
+        <datalist id="scopes-list">{scope_options}</datalist>
         <select name="fact_type">
           <option value="">All types</option>
           <option value="observation">observation</option>
@@ -753,6 +764,9 @@ def _render_facts_table(
         <input type="hidden" name="offset" value="{offset}">
         <input type="hidden" name="limit" value="{limit}">
         <button type="submit">Search</button>
+        <a href="?fact_type=observation" class="btn-dismiss">Observations</a>
+        <a href="?fact_type=inference" class="btn-dismiss">Inferences</a>
+        <a href="?fact_type=decision" class="btn-dismiss">Decisions</a>
       </form>
     </div>
     <div class="table-wrap">
