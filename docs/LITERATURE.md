@@ -619,3 +619,46 @@ For the 10% of cases that would benefit from graph:
 - Lineage tracking via `lineage_id` column
 - Temporal via valid_from/valid_until
 
+---
+
+## [11] Memory Poisoning Attack Taxonomy (Issue #79 Survey)
+
+**Topic:** Survey of memory poisoning attack taxonomy for multi-agent shared memory systems
+
+### Attack Surface
+
+In Engram, a "poisoned" fact is one that degrades team decision-making. Attack vectors:
+
+| Attack Type | Description | Engram Mitigation |
+|-------------|-------------|-------------------|
+| **False Fact Injection** | Commit incorrect observations | Provenance tracking, conflict detection |
+| **Semantic Drift** | Slowly shift facts via "updates" | Lineage tracking, corroboration scores |
+| **Scope Pollution** | Fill scopes with noise | Confidence scoring, query ranking |
+| **Conflict Spam** | Trigger false conflicts | Feedback loop tunes NLI threshold |
+| **TTL Abuse** | Set very long TTLs on bad facts | Max TTL enforcement (default 90 days) |
+
+### Threat Model
+
+**Adversary:** Curious team member (not external attacker)
+
+**Attack Feasibility:**
+
+| Attack | Difficulty | Impact | Engram Resilience |
+|--------|------------|--------|-------------------|
+| False fact | Medium | High | Conflict detection catches some |
+| Semantic drift | Low | Medium | Lineage visible, can trace changes |
+| Scope pollution | Easy | Low | Query ranking deprioritizes low-confidence |
+| Conflict spam | Easy | Low | Feedback loop trains it out |
+| TTL abuse | Easy | Medium | Enforced max TTL |
+
+### Recommendation
+
+**Current mitigations are sufficient for v1.** The threat model assumes trusted team members. For enterprise use with untrusted participants:
+
+1. Add commit approval workflow (require 2nd agent approval)
+2. Implement corroboration thresholds (3+ agents must agree)
+3. Add audit logs for fact provenance
+4. Rate limit commits per agent
+
+This is a v2 feature for untrusted multi-team scenarios.
+
