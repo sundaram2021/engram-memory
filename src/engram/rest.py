@@ -136,6 +136,8 @@ if TYPE_CHECKING:
     from engram.engine import EngramEngine
     from engram.storage import Storage
 
+from engram.tool_version import deprecation_warning, tool_surface_metadata
+
 logger = logging.getLogger("engram")
 
 
@@ -349,6 +351,7 @@ def build_rest_routes(
         resolution_type = body.get("resolution_type", "")
         resolution = body.get("resolution", "")
         winning_claim_id = body.get("winning_claim_id")
+        winning_fact_id = body.get("winning_fact_id")
 
         if not conflict_id:
             return _error("'conflict_id' is required.")
@@ -358,6 +361,19 @@ def build_rest_routes(
             return _error("'resolution_type' must be 'winner', 'merge', or 'dismissed'.")
         if not resolution:
             return _error("'resolution' is required.")
+
+        warnings: list[dict[str, str]] = []
+
+        if winning_claim_id is not None and winning_fact_id is not None:
+            return _error(
+                "Provide only one of 'winning_claim_id' or deprecated alias 'winning_fact_id'."
+            )
+
+        if winning_fact_id is not None:
+            warning = deprecation_warning("engram_resolve", "winning_fact_id")
+            if warning:
+                warnings.append(warning)
+            winning_claim_id = winning_fact_id
 
         try:
             result = await engine.resolve(
@@ -371,6 +387,10 @@ def build_rest_routes(
         except Exception as exc:
             logger.exception("REST /api/resolve error")
             return _error(str(exc), status=500)
+
+        result.update(tool_surface_metadata())
+        if warnings:
+            result["deprecation_warnings"] = warnings
 
         return JSONResponse(result)
 

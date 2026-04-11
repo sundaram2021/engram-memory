@@ -26,6 +26,7 @@ from mcp.server.fastmcp import FastMCP
 
 from engram.engine import EngramEngine
 from engram.storage import BaseStorage
+from engram.tool_version import deprecation_warning, tool_surface_metadata
 
 logger = logging.getLogger("engram")
 
@@ -91,6 +92,7 @@ async def _check_key_generation(ws: Any) -> dict[str, Any] | None:
         return {
             "status": "disconnected",
             "next_prompt": _DISCONNECTED_NEXT_PROMPT,
+            **tool_surface_metadata(),
         }
     return None
 
@@ -133,6 +135,7 @@ async def engram_status() -> dict[str, Any]:
             "engram_id": ws.engram_id,
             "schema": ws.schema,
             "anonymous_mode": ws.anonymous_mode,
+            **tool_surface_metadata(),
         }
 
     if ws and not ws.db_url and WORKSPACE_PATH.exists():
@@ -140,12 +143,14 @@ async def engram_status() -> dict[str, Any]:
             "status": "ready",
             "mode": "local",
             "engram_id": "local",
+            **tool_surface_metadata(),
         }
 
     db_url = os.environ.get("ENGRAM_DB_URL", "")
     if db_url:
         return {
             "status": "db_url_detected",
+            **tool_surface_metadata(),
             "next_prompt": (
                 "I detected a database connection string in your environment.\n\n"
                 "Do you have an Invite Key to join an existing workspace, "
@@ -157,6 +162,7 @@ async def engram_status() -> dict[str, Any]:
 
     return {
         "status": "unconfigured",
+        **tool_surface_metadata(),
         "next_prompt": (
             "Welcome to Engram — shared memory for your team's agents.\n\n"
             "How would you like to get started?\n\n"
@@ -960,6 +966,7 @@ async def engram_resolve(
     resolution_type: str,
     resolution: str,
     winning_claim_id: str | None = None,
+    winning_fact_id: str | None = None,
 ) -> dict[str, Any]:
     """Settle a disagreement between claims.
 
@@ -998,12 +1005,32 @@ async def engram_resolve(
     Example: {"resolved": true, "conflict_id": "conflict_123", "resolution_type": "winner"}
     """
     engine = get_engine()
-    return await engine.resolve(
+
+    warnings: list[dict[str, str]] = []
+
+    if winning_claim_id is not None and winning_fact_id is not None:
+        raise ValueError(
+            "Provide only one of 'winning_claim_id' or deprecated alias 'winning_fact_id'."
+        )
+
+    if winning_fact_id is not None:
+        warning = deprecation_warning("engram_resolve", "winning_fact_id")
+        if warning:
+            warnings.append(warning)
+        winning_claim_id = winning_fact_id
+
+    result = await engine.resolve(
         conflict_id=conflict_id,
         resolution_type=resolution_type,
         resolution=resolution,
         winning_claim_id=winning_claim_id,
     )
+
+    result.update(tool_surface_metadata())
+    if warnings:
+        result["deprecation_warnings"] = warnings
+
+    return result
 
 
 # ── engram_batch_commit ──────────────────────────────────────────────
