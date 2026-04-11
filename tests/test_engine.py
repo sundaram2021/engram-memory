@@ -41,6 +41,7 @@ async def test_commit_returns_proactive_suggestions_for_rate_limit(engine: Engra
     assert len(result["suggestions"]) <= 2
     assert any("retry" in s.lower() for s in result["suggestions"])
 
+
 def test_conflict_risk_estimation():
     engine = EngramEngine(storage=None)  # storage not needed for this test
 

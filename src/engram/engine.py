@@ -392,7 +392,7 @@ class EngramEngine:
             "duplicate": False,
             "conflicts_detected": False,  # detection is async
             "conflict_check_queued": durability == "durable",
-            "conflict_risk" : self._estimate_conflict_risk(content, scope),
+            "conflict_risk": self._estimate_conflict_risk(content, scope),
             "memory_op": operation,
             "supersedes_fact_id": supersedes_fact_id,
             "durability": durability,
@@ -420,7 +420,7 @@ class EngramEngine:
             pass
 
         return result
-    
+
     # Adding helper function estimate_conflict_risk.
     def _estimate_conflict_risk(self, content: str, scope: str) -> str:
         """
@@ -431,18 +431,26 @@ class EngramEngine:
         text = content.lower()
 
         risk_keywords = [
-            "always", "never", "must", "guaranteed",
-            "limit", "rate", "timeout", "threshold",
-            "retry", "should", "fail", "error"
+            "always",
+            "never",
+            "must",
+            "guaranteed",
+            "limit",
+            "rate",
+            "timeout",
+            "threshold",
+            "retry",
+            "should",
+            "fail",
+            "error",
         ]
 
         if any(char.isdigit() for char in text):
             return "high"
 
-        if any (word in text for word in risk_keywords):
+        if any(word in text for word in risk_keywords):
             return "medium"
-        
-        
+
         return "low"
 
     # ── engram_query ─────────────────────────────────────────────────
