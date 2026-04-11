@@ -87,15 +87,25 @@ All source lives under `src/engram/`.
 
 ## Rules
 
-@.claude/rules/clean-code.md
-@.claude/rules/clean-architecture.md
-@.claude/rules/code-style.md
-@.claude/rules/testing.md
+### Code Style
+- Use Ruff for formatting: `uv run ruff format`
+- Check linting: `uv run ruff check`
+- All new code must pass ruff checks before committing
+
+### Testing
+- Run tests before every commit: `uv run pytest tests/ -x`
+- Write tests for new features (location: tests/)
+- One test file per module: test_engine.py, test_storage.py, etc.
+
+### Commit Messages
+- Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`
+- Keep PRs focused — one feature/fix per PR
+- Include issue number in commit if applicable
 
 ## Key Documentation
 
 - `CONTRIBUTING.md` — Contribution workflow and PR guidelines
-- `AGENTS.md` — Universal AI assistant guidance (not Claude-specific)
-- `HIRING.md` — Paid contract opportunities for contributors
-- `docs/IMPLEMENTATION.md` — Architecture, research rounds, phase delivery plan
-- `docs/MIGRATION_SCHEMA.md` — Database migration guide for schema changes
+- `AGENTS.md` — Universal AI assistant guidance
+- `HIRING.md` — Paid contract opportunities ($125-185/hour)
+- `docs/IMPLEMENTATION.md` — Architecture and phase delivery plan
+- `docs/MIGRATION_SCHEMA.md` — Database migration guide
