@@ -206,9 +206,10 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
         return HTMLResponse(_render_timeline(facts))
 
     async def agents_view(request: Request) -> HTMLResponse:
+        search_query = request.query_params.get("q", "").strip()
         agents = await storage.get_agents()
         feedback = await storage.get_detection_feedback_stats()
-        return HTMLResponse(_render_agents(agents, feedback))
+        return HTMLResponse(_render_agents(agents, feedback, search_query=search_query))
 
     async def expiring_view(request: Request) -> HTMLResponse:
         days = int(request.query_params.get("days", "7"))
@@ -1007,16 +1008,29 @@ def _render_timeline(facts: list[dict]) -> str:
     return _dash_layout("Timeline", body, active="timeline", workspace_name=_get_workspace_name())
 
 
-def _render_agents(agents: list[dict], feedback: dict[str, int]) -> str:
+def _render_agents(agents: list[dict], feedback: dict[str, int], search_query: str = "") -> str:
     rows = []
-    for a in agents:
+    filtered_agents = agents
+    if search_query:
+        filtered_agents = [
+            a
+            for a in agents
+            if search_query.lower() in a.get("agent_id", "").lower()
+            or search_query.lower() in a.get("engineer", "").lower()
+        ]
+    for a in filtered_agents:
         total = a.get("total_commits", 0)
         flagged = a.get("flagged_commits", 0)
         reliability = f"{(1 - flagged / total) * 100:.0f}%" if total > 0 else "N/A"
+        rel_score = (1 - flagged / total) * 100 if total > 0 else 0
+        rel_badge = (
+            '<span class="badge badge-high">🔥 Top</span>' if rel_score >= 90 and total >= 5 else ""
+        )
         rows.append(
             f"<tr><td>{_esc(a['agent_id'])}</td>"
             f"<td>{_esc(a.get('engineer', ''))}</td>"
-            f"<td>{total}</td><td>{flagged}</td><td>{reliability}</td>"
+            f"<td>{total}</td><td>{flagged}</td>"
+            f"<td>{reliability} {rel_badge}</td>"
             f"<td>{_esc(a.get('registered_at', '')[:19])}</td>"
             f"<td>{_esc(a.get('last_seen', '') or '')[:19]}</td></tr>"
         )
@@ -1024,6 +1038,12 @@ def _render_agents(agents: list[dict], feedback: dict[str, int]) -> str:
     fp = feedback.get("false_positive", 0)
     body = f"""
     <h2>Agent Activity</h2>
+    <div class="filter-bar">
+      <form method="get" action="/dashboard/agents" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <input type="text" name="q" placeholder="Search agents..." value="{_esc(search_query)}" style="min-width:180px;">
+        <button type="submit">Search</button>
+      </form>
+    </div>
     <div class="stats">
       <div class="stat">
         <div class="stat-value">{len(agents)}</div>
@@ -1044,7 +1064,8 @@ def _render_agents(agents: list[dict], feedback: dict[str, int]) -> str:
           <th>Reliability</th><th>Registered</th><th>Last Seen</th></tr>
       {"".join(rows)}
     </table>
-    </div>"""
+    </div>
+    <p class="count-note">{len(filtered_agents)} agent(s)</p>"""
     return _dash_layout("Agents", body, active="agents", workspace_name=_get_workspace_name())
 
 
