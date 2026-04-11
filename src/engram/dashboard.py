@@ -139,7 +139,12 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
         scope = request.query_params.get("scope")
         status = request.query_params.get("status", "open")
         conflicts = await storage.get_conflicts(scope=scope, status=status)
-        return HTMLResponse(_render_conflicts_page(conflicts))
+
+        stats = {
+            "open": await storage.count_conflicts("open"),
+            "resolved": await storage.count_conflicts("resolved"),
+        }
+        return HTMLResponse(_render_conflicts_page(conflicts, stats=stats))
 
     async def approve_suggestion(request: Request) -> Response:
         """HTMX endpoint: approve the LLM-suggested resolution for a conflict."""
@@ -764,12 +769,33 @@ def _render_facts_table(
     )
 
 
-def _render_conflicts_page(conflicts: list[dict]) -> str:
+def _render_conflicts_page(conflicts: list[dict], stats: dict | None = None) -> str:
     cards = "".join(_render_conflict_card(c) for c in conflicts)
     if not cards:
         cards = '<p style="color:#9ab89a;font-size:0.85rem;padding:1rem 0;">No conflicts found.</p>'
+
+    open_count = (
+        sum(1 for c in conflicts if c.get("status") == "open")
+        if stats is None
+        else stats.get("open", 0)
+    )
+    resolved_count = (
+        sum(1 for c in conflicts if c.get("status") == "resolved")
+        if stats is None
+        else stats.get("resolved", 0)
+    )
     body = f"""
     <h2>Conflict Queue</h2>
+    <div class="stats">
+      <div class="stat stat-warn">
+        <div class="stat-value">{open_count}</div>
+        <div class="stat-label">Open</div>
+      </div>
+      <div class="stat stat-ok">
+        <div class="stat-value">{resolved_count}</div>
+        <div class="stat-label">Resolved</div>
+      </div>
+    </div>
     <div class="filter-bar">
       <form method="get" action="/dashboard/conflicts" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
         <input name="scope" placeholder="Scope filter" value="">
