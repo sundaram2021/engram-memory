@@ -1225,7 +1225,7 @@ def _esc(s: Any) -> str:
 
 
 def _render_fact_detail(fact: dict, lineage: list[dict]) -> str:
-    """Render detailed view of a single fact with lineage."""
+    """Render detailed view of a single fact with lineage and query log."""
     fact_id = fact.get("id", "")
     content = _esc(fact.get("content", ""))
     scope = _esc(fact.get("scope", ""))
@@ -1235,11 +1235,16 @@ def _render_fact_detail(fact: dict, lineage: list[dict]) -> str:
     committed_at = fact.get("committed_at", "")[:19]
     provenance = fact.get("provenance")
     lineage_id = fact.get("lineage_id", "")
+    query_hits = fact.get("query_hits", 0)
+    durability = fact.get("durability", "durable")
 
     verified = (
         '<span class="badge badge-verified">verified</span>'
         if provenance
         else '<span class="badge badge-unverified">unverified</span>'
+    )
+    durability_badge = (
+        f'<span class="badge badge-low">{durability}</span>' if durability == "ephemeral" else ""
     )
 
     lineage_html = ""
@@ -1266,7 +1271,21 @@ def _render_fact_detail(fact: dict, lineage: list[dict]) -> str:
                 <div><span style="color:#6b7280;font-size:0.85rem;">Confidence</span><div>{confidence:.2f}</div></div>
                 <div><span style="color:#6b7280;font-size:0.85rem;">Agent</span><div>{agent_id}</div></div>
                 <div><span style="color:#6b7280;font-size:0.85rem;">Committed</span><div>{committed_at}</div></div>
-                <div><span style="color:#6b7280;font-size:0.85rem;">Status</span><div>{verified}</div></div>
+                <div><span style="color:#6b7280;font-size:0.85rem;">Status</span><div>{verified} {durability_badge}</div></div>
+            </div>
+
+            <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid #e5e7eb;">
+                <h4 style="font-size:0.9rem;color:#6b7280;margin-bottom:0.5rem;">Query Log</h4>
+                <div style="display:flex;gap:1rem;">
+                    <div style="background:#fff;padding:0.5rem 1rem;border-radius:6px;border:1px solid #e5e7eb;">
+                        <span style="color:#6b7280;font-size:0.8rem;">Times Queried</span>
+                        <div style="font-size:1.5rem;font-weight:600;color:#111827;">{query_hits}</div>
+                    </div>
+                    <div style="background:#fff;padding:0.5rem 1rem;border-radius:6px;border:1px solid #e5e7eb;">
+                        <span style="color:#6b7280;font-size:0.8rem;">Corroborating Agents</span>
+                        <div style="font-size:1.5rem;font-weight:600;color:#111827;">{fact.get("corroborating_agents", 0)}</div>
+                    </div>
+                </div>
             </div>
             
             {lineage_html}
