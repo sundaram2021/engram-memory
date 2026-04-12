@@ -518,36 +518,38 @@ async def handle_create_workspace(request: Request) -> JSONResponse:
     expires_ts = _time.time() + 3650 * 86400
     pin_salt, encrypted_key = _encrypt_invite_key(invite_key, pin)
 
+    import datetime as _dt
+
+    expires_dt = _dt.datetime.fromtimestamp(expires_ts, tz=_dt.timezone.utc)
+
     try:
         async with pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO workspaces (engram_id) VALUES ($1)",
-                engram_id,
-            )
-            import datetime as _dt
-
-            expires_dt = _dt.datetime.fromtimestamp(expires_ts, tz=_dt.timezone.utc)
-            await conn.execute(
-                """INSERT INTO invite_keys (key_hash, engram_id, expires_at, uses_remaining)
-                   VALUES ($1, $2, $3, $4)""",
-                key_hash,
-                engram_id,
-                expires_dt,
-                1000,
-            )
-            await conn.execute(
-                """INSERT INTO workspace_keys (engram_id, pin_salt, encrypted_key)
-                   VALUES ($1, $2, $3)""",
-                engram_id,
-                pin_salt,
-                encrypted_key,
-            )
-            await conn.execute(
-                """INSERT INTO user_workspaces (user_id, engram_id, role)
-                   VALUES ($1, $2, 'owner')""",
-                session["sub"],
-                engram_id,
-            )
+            async with conn.transaction():
+                await conn.execute(
+                    "INSERT INTO workspaces (engram_id) VALUES ($1)",
+                    engram_id,
+                )
+                await conn.execute(
+                    """INSERT INTO invite_keys (key_hash, engram_id, expires_at, uses_remaining)
+                       VALUES ($1, $2, $3, $4)""",
+                    key_hash,
+                    engram_id,
+                    expires_dt,
+                    1000,
+                )
+                await conn.execute(
+                    """INSERT INTO workspace_keys (engram_id, pin_salt, encrypted_key)
+                       VALUES ($1, $2, $3)""",
+                    engram_id,
+                    pin_salt,
+                    encrypted_key,
+                )
+                await conn.execute(
+                    """INSERT INTO user_workspaces (user_id, engram_id, role)
+                       VALUES ($1, $2, 'owner')""",
+                    session["sub"],
+                    engram_id,
+                )
     except Exception as exc:
         return JSONResponse({"error": f"Failed to create workspace: {exc}"}, status_code=500)
 
