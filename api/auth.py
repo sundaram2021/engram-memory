@@ -58,6 +58,14 @@ CREATE TABLE IF NOT EXISTS user_workspaces (
     PRIMARY KEY (user_id, engram_id)
 );
 
+CREATE TABLE IF NOT EXISTS invite_keys (
+    key_hash       TEXT PRIMARY KEY,
+    engram_id      TEXT NOT NULL REFERENCES workspaces(engram_id),
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at     TIMESTAMPTZ,
+    uses_remaining INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS workspace_keys (
     engram_id     TEXT PRIMARY KEY,
     pin_salt      TEXT NOT NULL,
