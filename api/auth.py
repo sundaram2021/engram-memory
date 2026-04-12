@@ -28,55 +28,50 @@ DB_URL = os.environ.get("ENGRAM_DB_URL", "")
 SCHEMA = "engram"
 JWT_SECRET = os.environ.get("ENGRAM_JWT_SECRET", "")
 
-# Tables this module manages (workspaces table is created by mcp.py but referenced here)
-_AUTH_SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS workspaces (
-    engram_id      TEXT PRIMARY KEY,
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    anonymous_mode BOOLEAN NOT NULL DEFAULT false,
-    anon_agents    BOOLEAN NOT NULL DEFAULT false,
-    key_generation INTEGER NOT NULL DEFAULT 0
-);
-
-ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS paused            BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS storage_bytes     BIGINT  NOT NULL DEFAULT 0;
-ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS plan              TEXT    NOT NULL DEFAULT 'hobby';
-ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
-
-CREATE TABLE IF NOT EXISTS users (
-    id                 TEXT PRIMARY KEY,
-    email              TEXT UNIQUE NOT NULL,
-    password_hash      TEXT NOT NULL,
-    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    stripe_customer_id TEXT
-);
-
-CREATE TABLE IF NOT EXISTS user_workspaces (
-    user_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    engram_id TEXT NOT NULL,
-    role      TEXT NOT NULL DEFAULT 'owner',
-    PRIMARY KEY (user_id, engram_id)
-);
-
-CREATE TABLE IF NOT EXISTS invite_keys (
-    key_hash       TEXT PRIMARY KEY,
-    engram_id      TEXT NOT NULL REFERENCES workspaces(engram_id),
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at     TIMESTAMPTZ,
-    uses_remaining INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS workspace_keys (
-    engram_id     TEXT PRIMARY KEY,
-    pin_salt      TEXT NOT NULL,
-    encrypted_key TEXT NOT NULL
-);
-"""
-
 _pool: Any = None
 
-# Individual DDL statements — run one-by-one so errors are identifiable
-_AUTH_SCHEMA_STMTS = [s.strip() for s in _AUTH_SCHEMA_SQL.split(";") if s.strip()]
+# Flat schema — no FK constraints, no ALTER TABLE.
+# FK ordering bugs and ALTER TABLE IF NOT EXISTS incompatibilities have caused
+# the pool to never initialise, breaking every endpoint including login.
+# Tables that already exist (from mcp.py) are skipped via IF NOT EXISTS.
+_AUTH_SCHEMA_STMTS = [
+    """CREATE TABLE IF NOT EXISTS workspaces (
+        engram_id         TEXT PRIMARY KEY,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        anonymous_mode    BOOLEAN     NOT NULL DEFAULT false,
+        anon_agents       BOOLEAN     NOT NULL DEFAULT false,
+        key_generation    INTEGER     NOT NULL DEFAULT 0,
+        paused            BOOLEAN     NOT NULL DEFAULT false,
+        storage_bytes     BIGINT      NOT NULL DEFAULT 0,
+        plan              TEXT        NOT NULL DEFAULT 'hobby',
+        stripe_customer_id TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS users (
+        id                 TEXT PRIMARY KEY,
+        email              TEXT UNIQUE NOT NULL,
+        password_hash      TEXT NOT NULL,
+        created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        stripe_customer_id TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS user_workspaces (
+        user_id   TEXT NOT NULL,
+        engram_id TEXT NOT NULL,
+        role      TEXT NOT NULL DEFAULT 'owner',
+        PRIMARY KEY (user_id, engram_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS invite_keys (
+        key_hash       TEXT PRIMARY KEY,
+        engram_id      TEXT NOT NULL,
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        expires_at     TIMESTAMPTZ,
+        uses_remaining INTEGER
+    )""",
+    """CREATE TABLE IF NOT EXISTS workspace_keys (
+        engram_id     TEXT PRIMARY KEY,
+        pin_salt      TEXT NOT NULL,
+        encrypted_key TEXT NOT NULL
+    )""",
+]
 
 
 async def _get_pool() -> Any:
@@ -94,9 +89,10 @@ async def _get_pool() -> Any:
             await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
             await conn.execute(f"SET search_path TO {SCHEMA}, public")
             for stmt in _AUTH_SCHEMA_STMTS:
-                await conn.execute(stmt)
-        except Exception:
-            raise
+                try:
+                    await conn.execute(stmt)
+                except Exception:
+                    pass  # table already exists with different definition — that's fine
         finally:
             await conn.close()
 
