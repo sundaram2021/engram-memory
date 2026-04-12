@@ -1118,7 +1118,8 @@ class PostgresStorage(BaseStorage):
                 r = await conn.execute(
                     "UPDATE facts SET engineer = '[redacted]', provenance = NULL "
                     "WHERE agent_id = $1 AND workspace_id = $2",
-                    agent_id, wid,
+                    agent_id,
+                    wid,
                 )
                 facts_updated = int(r.split()[-1])
 
@@ -1131,21 +1132,24 @@ class PostgresStorage(BaseStorage):
                        WHERE workspace_id = $1
                          AND (fact_a_id IN (SELECT id FROM facts WHERE agent_id = $2 AND workspace_id = $1)
                               OR fact_b_id IN (SELECT id FROM facts WHERE agent_id = $2 AND workspace_id = $1))""",
-                    wid, agent_id,
+                    wid,
+                    agent_id,
                 )
                 conflicts_scrubbed = int(r.split()[-1])
 
                 r = await conn.execute(
                     "UPDATE agents SET engineer = '[redacted]', label = NULL "
                     "WHERE agent_id = $1 AND workspace_id = $2",
-                    agent_id, wid,
+                    agent_id,
+                    wid,
                 )
                 agents_updated = int(r.split()[-1])
 
                 r = await conn.execute(
                     "UPDATE audit_log SET agent_id = NULL, extra = '{}' "
                     "WHERE agent_id = $1 AND workspace_id = $2",
-                    agent_id, wid,
+                    agent_id,
+                    wid,
                 )
                 audit_rows_scrubbed = int(r.split()[-1])
 
@@ -1181,7 +1185,9 @@ class PostgresStorage(BaseStorage):
                            embedding    = NULL,
                            valid_until  = COALESCE(valid_until, $1)
                        WHERE agent_id = $2 AND workspace_id = $3""",
-                    now, agent_id, wid,
+                    now,
+                    agent_id,
+                    wid,
                 )
                 facts_updated = int(r.split()[-1])
 
@@ -1201,7 +1207,9 @@ class PostgresStorage(BaseStorage):
                          AND status = 'open'
                          AND (fact_a_id IN (SELECT id FROM facts WHERE agent_id = $3 AND workspace_id = $2)
                               OR fact_b_id IN (SELECT id FROM facts WHERE agent_id = $3 AND workspace_id = $2))""",
-                    now, wid, agent_id,
+                    now,
+                    wid,
+                    agent_id,
                 )
                 conflicts_closed = int(r.split()[-1])
 
@@ -1216,7 +1224,8 @@ class PostgresStorage(BaseStorage):
                          AND status != 'open'
                          AND (fact_a_id IN (SELECT id FROM facts WHERE agent_id = $2 AND workspace_id = $1)
                               OR fact_b_id IN (SELECT id FROM facts WHERE agent_id = $2 AND workspace_id = $1))""",
-                    wid, agent_id,
+                    wid,
+                    agent_id,
                 )
                 conflicts_scrubbed = int(r.split()[-1])
 
@@ -1226,13 +1235,15 @@ class PostgresStorage(BaseStorage):
                        WHERE workspace_id = $1
                          AND suggested_winning_fact_id IN
                              (SELECT id FROM facts WHERE agent_id = $2 AND workspace_id = $1)""",
-                    wid, agent_id,
+                    wid,
+                    agent_id,
                 )
 
                 r = await conn.execute(
                     "UPDATE agents SET engineer = '[redacted]', label = NULL "
                     "WHERE agent_id = $1 AND workspace_id = $2",
-                    agent_id, wid,
+                    agent_id,
+                    wid,
                 )
                 agents_updated = int(r.split()[-1])
 
@@ -1245,14 +1256,16 @@ class PostgresStorage(BaseStorage):
                 r = await conn.execute(
                     "UPDATE scopes SET owner_agent_id = NULL "
                     "WHERE owner_agent_id = $1 AND workspace_id = $2",
-                    agent_id, wid,
+                    agent_id,
+                    wid,
                 )
                 scopes_updated = int(r.split()[-1])
 
                 r = await conn.execute(
                     "UPDATE audit_log SET agent_id = NULL, extra = '{}' "
                     "WHERE agent_id = $1 AND workspace_id = $2",
-                    agent_id, wid,
+                    agent_id,
+                    wid,
                 )
                 audit_actor = int(r.split()[-1])
 
@@ -1262,7 +1275,8 @@ class PostgresStorage(BaseStorage):
                        WHERE workspace_id = $1
                          AND fact_id IN
                              (SELECT id FROM facts WHERE agent_id = $2 AND workspace_id = $1)""",
-                    wid, agent_id,
+                    wid,
+                    agent_id,
                 )
                 audit_fact = int(r.split()[-1])
 

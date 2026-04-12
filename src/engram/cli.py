@@ -1735,9 +1735,7 @@ def gdpr_erase(agent_id: str, mode: str, yes: bool) -> None:
         if ws is None:
             raise click.ClickException("No workspace configured. Run 'engram setup' first.")
         if not ws.is_creator:
-            raise click.ClickException(
-                "GDPR erasure is restricted to the workspace creator."
-            )
+            raise click.ClickException("GDPR erasure is restricted to the workspace creator.")
 
         if ws.db_url.startswith("postgres"):
             from engram.postgres_storage import PostgresStorage

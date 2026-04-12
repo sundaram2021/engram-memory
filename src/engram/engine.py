@@ -2426,9 +2426,7 @@ class EngramEngine:
         except PermissionError:
             raise
         except Exception as exc:
-            raise PermissionError(
-                f"Unable to verify workspace creator status: {exc}"
-            ) from exc
+            raise PermissionError(f"Unable to verify workspace creator status: {exc}") from exc
 
         if mode == "soft":
             stats = await self.storage.gdpr_soft_erase_agent(agent_id)
@@ -2439,8 +2437,8 @@ class EngramEngine:
             "gdpr_erase",
             agent_id=None,  # do not store the erased agent_id in the audit trail
             extra=f'{{"mode":"{mode}","facts_updated":{stats["facts_updated"]},'
-                  f'"conflicts_closed":{stats["conflicts_closed"]},'
-                  f'"actor":"{actor or "unknown"}"}}',
+            f'"conflicts_closed":{stats["conflicts_closed"]},'
+            f'"actor":"{actor or "unknown"}"}}',
         )
 
         return {

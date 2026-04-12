@@ -1909,8 +1909,7 @@ class SQLiteStorage(BaseStorage):
 
         # 5. Null owner_agent_id on scopes this agent owned.
         c = await self.db.execute(
-            "UPDATE scopes SET owner_agent_id = NULL "
-            "WHERE owner_agent_id = ? AND workspace_id = ?",
+            "UPDATE scopes SET owner_agent_id = NULL WHERE owner_agent_id = ? AND workspace_id = ?",
             (agent_id, wid),
         )
         scopes_updated = c.rowcount
