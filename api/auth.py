@@ -75,9 +75,14 @@ CREATE TABLE IF NOT EXISTS workspace_keys (
 
 _pool: Any = None
 
+# Individual DDL statements — run one-by-one so errors are identifiable
+_AUTH_SCHEMA_STMTS = [s.strip() for s in _AUTH_SCHEMA_SQL.split(";") if s.strip()]
+
 
 async def _get_pool() -> Any:
     global _pool
+    if not DB_URL:
+        raise RuntimeError("ENGRAM_DB_URL environment variable is not set")
     if _pool is None:
         import asyncpg
 
@@ -88,7 +93,10 @@ async def _get_pool() -> Any:
         try:
             await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
             await conn.execute(f"SET search_path TO {SCHEMA}, public")
-            await conn.execute(_AUTH_SCHEMA_SQL)
+            for stmt in _AUTH_SCHEMA_STMTS:
+                await conn.execute(stmt)
+        except Exception:
+            raise
         finally:
             await conn.close()
 
