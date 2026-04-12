@@ -493,7 +493,7 @@ async def _tool_commit(
             "status": "error",
             "paused": True,
             "message": (
-                "Workspace paused: free storage limit (512 MiB) exceeded. "
+                "Workspace paused: free storage limit (512 MB) exceeded. "
                 "Visit https://www.engram-us.com/dashboard to add a payment method and resume."
             ),
         }

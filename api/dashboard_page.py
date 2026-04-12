@@ -326,6 +326,7 @@ def _render_dashboard() -> str:
       font-family: inherit; transition: background 0.2s;
     }
     .copy-btn:hover { background: rgba(52,211,153,0.15); }
+    .copy-btn.copied { background: rgba(52,211,153,0.2); border-color: rgba(52,211,153,0.4); color: #34d399; }
 
     /* Workspace list action buttons */
     .ws-list-actions { display: flex; gap: 10px; }
@@ -711,7 +712,7 @@ def _render_dashboard() -> str:
     <div class="paused-banner" id="paused-banner" style="display:none">
       <div class="paused-banner-text">
         <strong>Workspace paused — free tier limit reached</strong>
-        <span>Your workspace has exceeded the 512 MiB free storage limit. Add a payment method to resume.</span>
+        <span>Your workspace has exceeded the 512 MB free storage limit. Add a payment method to resume.</span>
       </div>
       <button class="btn-sm btn-primary" onclick="startCheckout()">Add payment method</button>
     </div>
@@ -1027,7 +1028,7 @@ function renderWsGrid(workspaces) {
           <span class="badge ${plan === 'pro' ? 'badge-pro' : 'badge-hobby'}">${plan}</span>
         </div>
         <div class="ws-usage-bar"><div class="ws-usage-fill ${fillClass}" style="width:${pct}%"></div></div>
-        <div class="ws-usage-label">${storageMib} MiB / 512 MiB free</div>
+        <div class="ws-usage-label">${storageMib} MB / 512 MB free</div>
       </div>
       <div class="ws-card-footer">
         <button class="ws-key-btn" onclick="event.stopPropagation();openKeyModal('${wsId}')">View invite key</button>
@@ -1144,7 +1145,17 @@ async function submitCreateWorkspace() {
   }
 }
 function copyCreatedKey() {
-  if (_createdInviteKey) navigator.clipboard.writeText(_createdInviteKey);
+  if (_createdInviteKey) {
+    navigator.clipboard.writeText(_createdInviteKey);
+    _flashCopyBtn(event.target);
+  }
+}
+function _flashCopyBtn(btn) {
+  if (!btn) return;
+  const orig = btn.textContent;
+  btn.textContent = 'Copied!';
+  btn.classList.add('copied');
+  setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 2000);
 }
 
 // ── View invite key modal ───────────────────────────────────────────
@@ -1198,7 +1209,10 @@ async function submitRevealKey() {
   }
 }
 function copyRevealedKey() {
-  if (_revealedKey) navigator.clipboard.writeText(_revealedKey);
+  if (_revealedKey) {
+    navigator.clipboard.writeText(_revealedKey);
+    _flashCopyBtn(event.target);
+  }
 }
 
 // ── Open workspace detail ───────────────────────────────────────────
@@ -1546,13 +1560,13 @@ function renderBilling(b) {
     <div class="billing-card">
       <h3>Storage Usage</h3>
       <div class="usage-numbers">
-        <span>${storageMib.toFixed(2)} MiB used</span>
-        <span>512 MiB free</span>
+        <span>${storageMib.toFixed(2)} MB used</span>
+        <span>512 MB free</span>
       </div>
       <div class="usage-bar-lg"><div class="usage-fill-lg ${fillClass}" style="width:${Math.min(100,pct)}%"></div></div>
       <div style="font-size:13px;color:var(--tm)">${pct.toFixed(1)}% of free tier used</div>
       <p class="pricing-note">
-        Free tier: <strong>512 MiB</strong> (same as Neon's hobby plan)<br>
+        Free tier: <strong>512 MB</strong> (same as Neon's hobby plan)<br>
         Paid tier: <strong>$${b.price_per_gib_month}/GiB-month</strong>
         — 20% above Neon's rate, with identical free tier limits.
       </p>
