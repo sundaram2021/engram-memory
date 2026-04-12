@@ -11,7 +11,7 @@ By default, the installer writes `https://mcp.engram.app/mcp` into each MCP conf
 | **Claude Code** | `~/.claude.json` | `mcpServers.{type: "http", url}` | CLI agent by Anthropic |
 | **Claude Desktop** | `claude_desktop_config.json` | `npx mcp-remote` stdio bridge | No native remote URL support; installer uses [mcp-remote](https://www.npmjs.com/package/mcp-remote) as a bridge. Requires Node.js/npx. |
 | **Cursor** | `~/.cursor/mcp.json` | `mcpServers.{url}` | VS Code fork by Anysphere |
-| **VS Code** | `<User>/mcp.json` | `servers.{type: "http", url}` | Requires GitHub Copilot extension for MCP |
+| **VS Code Agent Mode** | `Code/User/mcp.json` | `servers.{type: "http", url}` | Requires GitHub Copilot with Agent Mode |
 | **Windsurf** | `~/.codeium/windsurf/mcp_config.json` | `mcpServers.{serverUrl}` | Uses `serverUrl` key, not `url` |
 | **Kiro** | `~/.kiro/settings/mcp.json` | `mcpServers.{url}` | By AWS |
 | **Zed** | `settings.json` | `context_servers.{url}` | Rust-based editor; uses `context_servers` key |
@@ -87,7 +87,7 @@ After installation:
 1. Restart or reload your IDE if it was already open.
 2. Confirm that Engram was added to the IDE's MCP config file:
    - Cursor: `~/.cursor/mcp.json`
-   - VS Code: `<User>/mcp.json`
+   - VS Code Agent Mode: `Code/User/mcp.json`
    - Claude Code: `~/.claude.json`
 3. Open your IDE's MCP or tools UI, if available, and confirm the Engram server appears and is enabled.
 4. If you are joining an existing workspace, use your invite key during install.
@@ -121,9 +121,8 @@ If you install with `--join`, the final line will instead look like:
 
 ### VS Code
 **Common failure:** VS Code uses `servers.engram`, not `mcpServers.engram`.  
-**Fix:** Confirm Engram was written under `servers` in `<User>/mcp.json`, then restart VS Code.
+**Fix:** Confirm Engram was written under `servers` in `Code/User/mcp.json`, then restart VS Code and approve the MCP server trust prompt if shown.
 
 ### Claude Code
 **Common failure:** Claude Code and Claude Desktop use different config files and setup methods.  
 **Fix:** Check `~/.claude.json`, confirm Engram is listed under `mcpServers.engram`, then restart Claude Code.
-

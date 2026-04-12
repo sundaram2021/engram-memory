@@ -71,3 +71,33 @@ def test_install_writes_zed_context_server_url(tmp_path, monkeypatch):
         assert "context_servers" in data
         assert "engram" in data["context_servers"]
         assert data["context_servers"]["engram"] == {"url": "https://mcp.engram.app/mcp"}
+
+
+def test_install_writes_vscode_copilot_http_server(tmp_path, monkeypatch):
+    runner = CliRunner()
+    workspace_path = tmp_path / ".engram" / "workspace.json"
+
+    monkeypatch.setenv("ENGRAM_MCP_URL", "https://mcp.engram.app/mcp")
+
+    with (
+        patch("pathlib.Path.home", return_value=tmp_path),
+        patch("engram.workspace.WORKSPACE_PATH", workspace_path),
+        patch("engram.cli._MCP_CLIENTS", _rebased_mcp_clients(tmp_path)),
+    ):
+        config_path = (
+            tmp_path / "Library" / "Application Support" / "Code" / "User" / "mcp.json"
+        )
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("{}")
+
+        result = runner.invoke(main, ["install"])
+
+        assert result.exit_code == 0
+
+        data = json.loads(config_path.read_text())
+        assert "servers" in data
+        assert "engram" in data["servers"]
+        assert data["servers"]["engram"] == {
+            "type": "http",
+            "url": "https://mcp.engram.app/mcp",
+        }

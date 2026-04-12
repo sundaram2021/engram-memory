@@ -237,6 +237,43 @@ class TestVerifyCommand:
         assert "✓" in result.output
         assert "Zed" in result.output
 
+    def test_verify_detects_vscode_copilot_servers_config(self, cli_runner, temp_home):
+        """Test verify detects VS Code Agent Mode's servers.engram config shape."""
+        workspace_dir = temp_home / ".engram"
+        workspace_dir.mkdir(parents=True)
+        workspace_file = workspace_dir / "workspace.json"
+        workspace_file.write_text(
+            json.dumps(
+                {
+                    "engram_id": "ENG-TEST-1234",
+                    "db_url": "",
+                    "schema": "engram",
+                }
+            )
+        )
+
+        vscode_dir = temp_home / "Library" / "Application Support" / "Code" / "User"
+        vscode_dir.mkdir(parents=True)
+        (vscode_dir / "mcp.json").write_text(
+            json.dumps(
+                {
+                    "servers": {
+                        "engram": {
+                            "type": "http",
+                            "url": "https://mcp.engram.app/mcp",
+                        }
+                    }
+                }
+            )
+        )
+
+        with patch("pathlib.Path.home", return_value=temp_home):
+            result = cli_runner.invoke(main, ["verify"])
+
+        assert result.exit_code == 0
+        assert "✓" in result.output
+        assert "VS Code (Copilot)" in result.output
+
     def test_verify_verbose_flag(self, cli_runner, temp_home):
         """Test verify with --verbose flag shows additional details."""
         # Create workspace
@@ -439,10 +476,19 @@ class TestVerifyMCPClientDetection:
         )
 
         # VS Code
-        vscode_dir = temp_home / ".vscode"
+        vscode_dir = temp_home / "Library" / "Application Support" / "Code" / "User"
         vscode_dir.mkdir(parents=True)
         (vscode_dir / "mcp.json").write_text(
-            json.dumps({"mcpServers": {"engram": {"command": "uvx"}}})
+            json.dumps(
+                {
+                    "servers": {
+                        "engram": {
+                            "type": "http",
+                            "url": "https://mcp.engram.app/mcp",
+                        }
+                    }
+                }
+            )
         )
 
         with patch("pathlib.Path.home", return_value=temp_home):

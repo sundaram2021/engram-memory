@@ -16,6 +16,7 @@ import logging
 import sys
 from pathlib import Path
 import os
+import platform
 
 import click
 
@@ -25,7 +26,11 @@ from engram.storage import DEFAULT_DB_PATH
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 _PATH_SYSTEM_HOME = Path.home()
 _PATH_APPDATA_DIR = Path(os.environ["APPDATA"]) if "APPDATA" in os.environ else None
-_PATH_APPSUPPORT_DIR = _PATH_SYSTEM_HOME / "Library" / "Application Support"  # Mac only
+_PATH_APPSUPPORT_DIR = (
+    _PATH_SYSTEM_HOME / "Library" / "Application Support"
+    if platform.system() == "Darwin"
+    else None
+)
 _PATH_XDG_DIR = (
     Path(os.environ["XDG_CONFIG_HOME"])
     if "XDG_CONFIG_HOME" in os.environ
@@ -78,6 +83,9 @@ def _engram_mcp_entry_for_client(client_name: str) -> dict[str, object]:
 
     if client_name == "Zed":
         return {"url": mcp_url}
+
+    if client_name.startswith("VS Code"):
+        return {"type": "http", "url": mcp_url}
 
     return {
         "command": "uvx",
