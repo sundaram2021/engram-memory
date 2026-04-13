@@ -53,6 +53,9 @@ ENGRAM_TERMS = (
 )
 
 # ── Schema SQL ───────────────────────────────────────────────────────
+# IMPORTANT: After editing _SCHEMA_SQL (adding tables, columns, indexes),
+# bump _SCHEMA_VERSION below the DB pool section. This ensures the new
+# schema runs on the next deployment even on warm Vercel workers.
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -151,28 +154,31 @@ CREATE TABLE IF NOT EXISTS user_workspaces (
 
 # ── DB pool ──────────────────────────────────────────────────────────
 
+# Bump this version whenever _SCHEMA_SQL changes (new tables, columns, indexes).
+# The bootstrap runs on every cold start AND re-runs if the version changes
+# on a warm instance (e.g. after a Vercel deployment reuses an existing worker).
+_SCHEMA_VERSION = 2
 _pool: Any = None
-_schema_ready = False
+_schema_version_applied: int = 0
 
 
 async def _get_pool() -> Any:
-    global _pool, _schema_ready
+    global _pool, _schema_version_applied
     if not DB_URL:
         raise RuntimeError("ENGRAM_DB_URL not configured")
 
     import asyncpg
 
-    if not _schema_ready:
+    if _schema_version_applied < _SCHEMA_VERSION:
         conn = await asyncpg.connect(DB_URL)
         try:
             await conn.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
             await conn.execute(f"SET search_path TO {SCHEMA}, public")
-            await conn.execute(_SCHEMA_SQL)
-            _schema_ready = True
-        except Exception as exc:
-            # Fallback: try each statement individually
-            logger.warning("Multi-statement schema failed (%s), trying individually", exc)
+            # Try multi-statement first, fall back to individual
             try:
+                await conn.execute(_SCHEMA_SQL)
+            except Exception as exc:
+                logger.warning("Multi-statement schema failed (%s), trying individually", exc)
                 await conn.execute(f"SET search_path TO {SCHEMA}, public")
                 for stmt in _SCHEMA_SQL.split(";"):
                     stmt = stmt.strip()
@@ -181,10 +187,10 @@ async def _get_pool() -> Any:
                             await conn.execute(stmt)
                         except Exception as stmt_exc:
                             logger.warning("Statement failed: %s — %s", stmt[:60], stmt_exc)
-                _schema_ready = True
-            except Exception as exc2:
-                logger.error("Schema bootstrap failed completely: %s", exc2)
-                raise
+            _schema_version_applied = _SCHEMA_VERSION
+        except Exception as exc:
+            logger.error("Schema bootstrap failed: %s", exc)
+            raise
         finally:
             await conn.close()
 
