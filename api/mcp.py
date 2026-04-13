@@ -31,7 +31,7 @@ from starlette.routing import Route
 logger = logging.getLogger("engram")
 
 DB_URL = os.environ.get("ENGRAM_DB_URL", "")
-SCHEMA = "public"
+SCHEMA = "engram"
 
 # Billing
 HOBBY_LIMIT_BYTES = 512 * 1024 * 1024  # 512 MiB — same as Neon's free tier
