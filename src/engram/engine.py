@@ -1825,6 +1825,39 @@ class EngramEngine:
                 return None
         return self._nli_model
 
+    # ── Conflict Risk Estimation ─────────────────────────────────────
+
+    def _estimate_conflict_risk(self, content: str, scope: str) -> str:
+        """Return a rough conflict risk level ('low', 'medium', 'high') for a commit.
+
+        Uses lightweight heuristics — no ML, no DB queries — so it runs
+        synchronously in the commit hot path without adding latency.
+        """
+        content_lower = content.lower()
+        # High-risk: numeric values, config keys, version strings, or
+        # explicit contradiction language tend to conflict more often.
+        high_signals = [
+            any(c.isdigit() for c in content),  # contains a number
+            "version" in content_lower,
+            "config" in content_lower,
+            "deprecated" in content_lower,
+            "removed" in content_lower,
+            "changed" in content_lower,
+            "now uses" in content_lower,
+            "switched to" in content_lower,
+        ]
+        medium_signals = [
+            "should" in content_lower,
+            "must" in content_lower,
+            "always" in content_lower,
+            "never" in content_lower,
+        ]
+        if sum(high_signals) >= 2:
+            return "high"
+        if sum(high_signals) >= 1 or sum(medium_signals) >= 2:
+            return "medium"
+        return "low"
+
     # ── Corroboration Detection (Phase 2) ────────────────────────────
 
     async def _check_corroboration(
