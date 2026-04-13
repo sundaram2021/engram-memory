@@ -306,23 +306,9 @@ async def _auth_workspace(request: Request) -> str | None:
         return None
     invite_key = auth[7:]
     try:
-        _decode_invite_key(invite_key)
-    except ValueError:
-        return None
-    key_hash = _invite_key_hash(invite_key)
-    try:
-        pool = await _get_pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT uses_remaining, engram_id FROM invite_keys WHERE key_hash = $1",
-                key_hash,
-            )
-        if not row:
-            return None
-        if row["uses_remaining"] is not None and row["uses_remaining"] <= 0:
-            return None
-        return row["engram_id"]
-    except Exception:
+        payload = _decode_invite_key(invite_key)
+        return payload.get("engram_id")
+    except (ValueError, Exception):
         return None
 
 
