@@ -54,12 +54,22 @@ Equally important is what it does **not** flag:
 
 - **Natural progression** — "We did X, then improved to Y" is normal development.
   The detective does not flag evolution, only incoherence.
+- **Design iteration and mind-changes** — When someone corrects or refines an earlier
+  decision, the later fact *is* the current truth. The earlier fact is just history.
+  This is how architecture solidifies. The arc "we thought X → actually it's Y" is
+  resolved, not ambiguous. The detective reads the most recent relevant fact as
+  settling the question.
 - **Facts about different subjects** — Even if two facts use similar words, if they
   describe different things, there is no confusion.
 - **Facts from the same conversation** — Facts committed minutes apart in the same
   scope, evolving together, are not flagged. That is a working session, not a conflict.
 - **Cases where chronological order makes the current state clear** — If the story
   unambiguously resolves to a current state, no flag is raised.
+
+The key test the detective applies: does the *most recent* relevant fact leave the
+question open, or does it settle it? If it settles it, no flag. Only when the latest
+state of the story is genuinely unclear — two equally current-looking facts pointing
+in different directions — does the detective intervene.
 
 The goal is a low false-positive rate. A new agent reading the facts should be able
 to act on them. The detective only intervenes when that agent would genuinely not know
@@ -120,9 +130,16 @@ would get confused. You're looking for:
 
 DO NOT FLAG:
 • Natural progression (we did X, then improved to Y) — that's normal
+• Design iteration and mind-changes — when someone corrects or refines an
+  earlier decision, the later fact IS the current truth. The earlier fact
+  is just history. The arc 'we thought X → actually it's Y' is resolved.
 • Facts about different subjects, even if they use similar words
 • Facts from the same conversation (minutes apart, same scope) evolving
-• Anything where the chronological order makes the current state clear
+• Anything where the chronological order makes the current state clear —
+  if the most recent fact settles the question, there is no confusion
+
+The key test: does the MOST RECENT relevant fact leave the question open,
+or does it settle it? If it settles it, do not flag.
 
 For each confusion you find, return:
 - "fact_ids": array of the 8-char IDs of the facts involved
