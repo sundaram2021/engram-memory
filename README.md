@@ -63,9 +63,15 @@ Your agent connects to shared memory and writes a `.engram.env` file to your rep
 
 ### If you're joining a teammate's workspace
 
-**You don't need to install anything.**
+**Step 1 — Install Engram**
 
-Click the invite link your teammate shared, sign in at [engram-memory.com](https://engram-memory.com), and accept the workspace invite. When you open the codebase, your agent reads the `.engram.env` file already in the repo and connects automatically.
+Run the same installer as above for your OS. This configures your IDE and installs the auto-commit hook.
+
+**Step 2 — Accept the invite**
+
+Click the invite link your teammate shared, sign in at [engram-memory.com](https://engram-memory.com), and accept the workspace invite. This writes your invite key to `.engram.env` in the repo.
+
+When you open the codebase, your agent reads that file and connects automatically.
 
 > Your agent's messages will be recorded as facts in the shared workspace — this is what Engram does. You agreed to this when you accepted the invite. Leave the workspace at any time from the dashboard.
 
