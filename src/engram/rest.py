@@ -883,7 +883,7 @@ def build_rest_routes(
 
         return JSONResponse(result)
 
-    async def api_invite_key_rotate(request: Request) -> Response:
+    async def api_invite_key_rotate(request: Request) -> JSONResponse:
         """POST /api/invite-key/rotate — rotate the workspace invite key.
 
         Body (JSON):
@@ -918,7 +918,7 @@ def build_rest_routes(
 
         return JSONResponse({"status": "rotated", **result})
 
-    async def api_invite_key_history(request: Request) -> Response:
+    async def api_invite_key_history(request: Request) -> JSONResponse:
         """GET /api/invite-key/history?limit=N — rotation audit trail.
 
         Returns a list of audit log entries for key_rotation events,
