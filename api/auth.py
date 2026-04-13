@@ -631,6 +631,94 @@ async def handle_invite_key(request: Request) -> JSONResponse:
     return JSONResponse({"invite_key": invite_key})
 
 
+async def handle_reset_invite_key(request: Request) -> JSONResponse:
+    """Revoke all existing invite keys and issue a new one (PIN required)."""
+    session = _get_jwt_from_request(request)
+    if not session:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    engram_id = (body.get("engram_id") or "").strip()
+    pin = str(body.get("pin") or "").strip()
+
+    if not engram_id or not pin:
+        return JSONResponse({"error": "engram_id and pin required"}, status_code=400)
+    if not pin.isdigit() or len(pin) != 4:
+        return JSONResponse({"error": "Invalid PIN"}, status_code=400)
+
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            owns = await conn.fetchrow(
+                f"SELECT 1 FROM {SCHEMA}.user_workspaces WHERE user_id = $1 AND engram_id = $2",
+                session["sub"],
+                engram_id,
+            )
+            if not owns:
+                return JSONResponse(
+                    {"error": "Workspace not found or access denied"}, status_code=403
+                )
+
+            row = await conn.fetchrow(
+                f"SELECT pin_salt, encrypted_key FROM {SCHEMA}.workspace_keys WHERE engram_id = $1",
+                engram_id,
+            )
+            if not row:
+                return JSONResponse(
+                    {"error": "No key record found for this workspace."}, status_code=404
+                )
+
+            # Verify PIN before doing anything destructive
+            try:
+                existing = _decrypt_invite_key(pin, row["pin_salt"], row["encrypted_key"])
+            except Exception:
+                return JSONResponse({"error": "Incorrect PIN"}, status_code=401)
+            if not existing.startswith("ek_live_"):
+                return JSONResponse({"error": "Incorrect PIN"}, status_code=401)
+
+            import datetime as _dt
+            import time as _time
+
+            new_key, new_hash = _generate_invite_key(engram_id)
+            expires_dt = _dt.datetime.fromtimestamp(
+                _time.time() + 3650 * 86400, tz=_dt.timezone.utc
+            )
+            new_salt, new_encrypted = _encrypt_invite_key(new_key, pin)
+
+            async with conn.transaction():
+                # Revoke all existing keys for this workspace
+                await conn.execute(
+                    f"DELETE FROM {SCHEMA}.invite_keys WHERE engram_id = $1", engram_id
+                )
+                # Insert the new key
+                await conn.execute(
+                    f"""INSERT INTO {SCHEMA}.invite_keys
+                        (key_hash, engram_id, expires_at, uses_remaining)
+                        VALUES ($1, $2, $3, $4)""",
+                    new_hash,
+                    engram_id,
+                    expires_dt,
+                    1000,
+                )
+                # Re-encrypt and store the new key with the same PIN
+                await conn.execute(
+                    f"""UPDATE {SCHEMA}.workspace_keys
+                        SET pin_salt = $1, encrypted_key = $2
+                        WHERE engram_id = $3""",
+                    new_salt,
+                    new_encrypted,
+                    engram_id,
+                )
+    except Exception as exc:
+        return JSONResponse({"error": f"Database error: {exc}"}, status_code=500)
+
+    return JSONResponse({"status": "reset", "invite_key": new_key})
+
+
 async def handle_options(request: Request) -> Response:
     return Response(
         headers={
@@ -697,6 +785,7 @@ app = Starlette(
         Route("/auth/create-workspace", handle_create_workspace, methods=["POST"]),
         Route("/auth/invite-key", handle_invite_key, methods=["POST"]),
         Route("/auth/rename-workspace", handle_rename_workspace, methods=["POST"]),
+        Route("/auth/reset-invite-key", handle_reset_invite_key, methods=["POST"]),
         Route("/auth/{path:path}", handle_options, methods=["OPTIONS"]),
     ]
 )

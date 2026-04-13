@@ -910,6 +910,31 @@ def _render_dashboard() -> str:
       <button class="copy-btn" onclick="copyRevealedKey()">Copy invite key</button>
       <div class="modal-actions" style="margin-top:16px">
         <button class="btn-sm btn-ghost" onclick="closeKeyModal()">Close</button>
+        <button class="btn-sm" onclick="showResetConfirm()"
+          style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);color:#f87171;">
+          Reset key
+        </button>
+      </div>
+    </div>
+    <div id="key-step-reset" style="display:none">
+      <h3>Reset invite key?</h3>
+      <p class="subtitle">This will permanently revoke the current key. Anyone using it will lose access immediately. A new key will be generated — you'll need to share it with your team.</p>
+      <div class="auth-msg error" id="reset-key-error"></div>
+      <div class="modal-actions" style="margin-top:20px">
+        <button class="btn-sm btn-ghost" onclick="cancelResetKey()">Cancel</button>
+        <button class="btn-sm" id="reset-key-btn" onclick="submitResetKey()"
+          style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#f87171;font-weight:700;">
+          Yes, reset key
+        </button>
+      </div>
+    </div>
+    <div id="key-step-reset-done" style="display:none">
+      <h3>New invite key</h3>
+      <p class="subtitle">The old key has been revoked. Share this new key with your team.</p>
+      <div class="invite-key-box" id="new-invite-key-box"></div>
+      <button class="copy-btn" onclick="copyNewKey()">Copy invite key</button>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn-sm btn-primary" onclick="closeKeyModal()">Done</button>
       </div>
     </div>
   </div>
@@ -1231,9 +1256,10 @@ function openKeyModal(engram_id) {
 }
 function closeKeyModal() {
   document.getElementById('key-modal').classList.remove('open');
-  _keyModalWsId = null;
-  _revealedKey = null;
+  _keyModalWsId = null; _revealedKey = null; _newKey = null;
   clearPinDigits(KEY_PIN_IDS);
+  ['key-step-reset','key-step-reset-done'].forEach(id =>
+    document.getElementById(id).style.display = 'none');
 }
 async function submitRevealKey() {
   const pin = getPinValue(KEY_PIN_IDS);
@@ -1267,6 +1293,44 @@ function copyRevealedKey() {
     navigator.clipboard.writeText(_revealedKey);
     _flashCopyBtn(event.target);
   }
+}
+
+let _newKey = null;
+function showResetConfirm() {
+  document.getElementById('key-step-done').style.display = 'none';
+  document.getElementById('reset-key-error').style.display = 'none';
+  document.getElementById('key-step-reset').style.display = 'block';
+}
+function cancelResetKey() {
+  document.getElementById('key-step-reset').style.display = 'none';
+  document.getElementById('key-step-done').style.display = 'block';
+}
+async function submitResetKey() {
+  const btn = document.getElementById('reset-key-btn');
+  const errEl = document.getElementById('reset-key-error');
+  errEl.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Resetting…';
+  try {
+    const pin = getPinValue(KEY_PIN_IDS);
+    const r = await fetch('/auth/reset-invite-key', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ engram_id: _keyModalWsId, pin }),
+    });
+    const d = await r.json();
+    if (!r.ok) { errEl.textContent = d.error || 'Reset failed'; errEl.style.display = 'block'; return; }
+    _newKey = d.invite_key;
+    document.getElementById('new-invite-key-box').textContent = d.invite_key;
+    document.getElementById('key-step-reset').style.display = 'none';
+    document.getElementById('key-step-reset-done').style.display = 'block';
+  } catch(e) {
+    errEl.textContent = 'Connection error'; errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Yes, reset key';
+  }
+}
+function copyNewKey() {
+  if (_newKey) { navigator.clipboard.writeText(_newKey); _flashCopyBtn(event.target); }
 }
 
 // ── Open workspace detail ───────────────────────────────────────────
