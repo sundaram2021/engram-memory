@@ -410,7 +410,9 @@ async def _detect_conflicts(
                 )
                 for row in existing:
                     old_content = row["content"]
-                    old_nums = {m.group(0).lower() for m in _NUM_RE.finditer(old_content) if m.group(1)}
+                    old_nums = {
+                        m.group(0).lower() for m in _NUM_RE.finditer(old_content) if m.group(1)
+                    }
                     old_ents = {m.group(1) for m in _ENTITY_RE.finditer(old_content)}
                     shared_ents = new_ents & old_ents
                     conflicting_nums = new_nums ^ old_nums
@@ -425,7 +427,11 @@ async def _detect_conflicts(
                                    severity, workspace_id)
                                VALUES ($1, $2, $3, $4, 'medium', $5)
                                ON CONFLICT DO NOTHING""",
-                            cid, new_fact_id, row["id"], explanation, workspace_id,
+                            cid,
+                            new_fact_id,
+                            row["id"],
+                            explanation,
+                            workspace_id,
                         )
     except Exception as exc:
         logger.warning("Tier 0 conflict detection failed: %s", exc)
@@ -486,6 +492,7 @@ async def _detect_conflicts(
 
             try:
                 import httpx
+
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     resp = await client.post(
                         "https://api.openai.com/v1/chat/completions",
@@ -496,7 +503,10 @@ async def _detect_conflicts(
                         json={
                             "model": _CONFLICT_MODEL,
                             "messages": [
-                                {"role": "system", "content": "You detect contradictions between facts. Respond only with valid JSON arrays."},
+                                {
+                                    "role": "system",
+                                    "content": "You detect contradictions between facts. Respond only with valid JSON arrays.",
+                                },
                                 {"role": "user", "content": prompt},
                             ],
                             "temperature": 0,
@@ -504,7 +514,9 @@ async def _detect_conflicts(
                         },
                     )
                     if resp.status_code != 200:
-                        logger.warning("OpenAI API returned %d: %s", resp.status_code, resp.text[:200])
+                        logger.warning(
+                            "OpenAI API returned %d: %s", resp.status_code, resp.text[:200]
+                        )
                         return []
                     data = resp.json()
                     raw = data["choices"][0]["message"]["content"].strip()
@@ -540,7 +552,9 @@ async def _detect_conflicts(
                            WHERE workspace_id = $1
                              AND ((fact_a_id = $2 AND fact_b_id = $3)
                                OR (fact_a_id = $3 AND fact_b_id = $2))""",
-                        workspace_id, new_fact_id, full_id,
+                        workspace_id,
+                        new_fact_id,
+                        full_id,
                     )
                     if existing:
                         continue
@@ -548,18 +562,26 @@ async def _detect_conflicts(
                     severity = conflict.get("severity", "medium")
                     if severity not in ("high", "medium", "low"):
                         severity = "medium"
-                    explanation = conflict.get("explanation", "Semantic contradiction detected by LLM")
+                    explanation = conflict.get(
+                        "explanation", "Semantic contradiction detected by LLM"
+                    )
                     await conn.execute(
                         """INSERT INTO conflicts (id, fact_a_id, fact_b_id, explanation,
                                severity, workspace_id)
                            VALUES ($1, $2, $3, $4, $5, $6)
                            ON CONFLICT DO NOTHING""",
-                        cid, new_fact_id, full_id,
-                        f"[LLM] {explanation}", severity, workspace_id,
+                        cid,
+                        new_fact_id,
+                        full_id,
+                        f"[LLM] {explanation}",
+                        severity,
+                        workspace_id,
                     )
                     logger.info(
                         "LLM conflict detected: %s vs %s — %s",
-                        new_fact_id[:8], full_id[:8], explanation,
+                        new_fact_id[:8],
+                        full_id[:8],
+                        explanation,
                     )
 
     except Exception as exc:

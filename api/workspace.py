@@ -273,7 +273,13 @@ async def handle_search(request: Request) -> JSONResponse:
     agents = [{k: _ser(v) for k, v in dict(r).items()} for r in agent_rows]
 
     return JSONResponse(
-        {"facts": facts, "conflicts": conflicts, "agents": agents, "workspace_id": engram_id, "storage_bytes": storage_bytes},
+        {
+            "facts": facts,
+            "conflicts": conflicts,
+            "agents": agents,
+            "workspace_id": engram_id,
+            "storage_bytes": storage_bytes,
+        },
         headers={"Access-Control-Allow-Origin": "*"},
     )
 
@@ -386,7 +392,13 @@ async def handle_session_search(request: Request) -> JSONResponse:
     agents = [{k: _ser(v) for k, v in dict(r).items()} for r in agent_rows]
 
     return JSONResponse(
-        {"facts": facts, "conflicts": conflicts, "agents": agents, "workspace_id": engram_id, "storage_bytes": storage_bytes},
+        {
+            "facts": facts,
+            "conflicts": conflicts,
+            "agents": agents,
+            "workspace_id": engram_id,
+            "storage_bytes": storage_bytes,
+        },
         headers={"Access-Control-Allow-Origin": "*"},
     )
 
