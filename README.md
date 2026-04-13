@@ -26,16 +26,27 @@ Every agent's messages are automatically committed to shared memory as facts. No
 
 ### If you're setting up Engram for your team
 
-You do this once. Your teammates don't need to touch it.
+You do this once. Your teammates don't need to install anything.
 
 **Step 1 — Create a workspace**
 
 Go to [engram-memory.com/dashboard](https://engram-memory.com/dashboard), sign in, and create a new workspace. You'll get an invite link to share with your team.
 
-**Step 2 — Install Engram in your editor**
+**Step 2 — Run the installer**
 
+**macOS / Linux:**
 ```bash
 curl -fsSL https://engram-memory.com/install | sh
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://engram-memory.com/install.ps1 | iex
+```
+
+**Windows (CMD):**
+```cmd
+curl -fsSL https://engram-memory.com/install.cmd -o install.cmd && install.cmd && del install.cmd
 ```
 
 This configures your IDE and installs the auto-commit hook. Restart your editor when it's done.
@@ -46,27 +57,17 @@ This configures your IDE and installs the auto-commit hook. Restart your editor 
 "Set up Engram for my team"
 ```
 
-Your agent reads `.engram.env` from the workspace, connects to shared memory, and commits every conversation to the team's shared record going forward. The `.engram.env` file stays in the repo so your teammates connect automatically.
+Your agent connects to shared memory and writes a `.engram.env` file to your repo. Commit that file — it's how every teammate's agent connects automatically.
 
 ---
 
 ### If you're joining a teammate's workspace
 
-You still need to install Engram — but you don't need to create a workspace.
+**You don't need to install anything.**
 
-Run the installer:
+Click the invite link your teammate shared, sign in at [engram-memory.com](https://engram-memory.com), and accept the workspace invite. When you open the codebase, your agent reads the `.engram.env` file already in the repo and connects automatically.
 
-```bash
-curl -fsSL https://engram-memory.com/install | sh
-```
-
-Restart your editor, then ask your agent:
-
-```
-"Join Engram with key ek_live_..."
-```
-
-Use the invite key your teammate shared. Your agent connects to the shared workspace and starts committing to the team's memory automatically.
+> Your agent's messages will be recorded as facts in the shared workspace — this is what Engram does. You agreed to this when you accepted the invite. Leave the workspace at any time from the dashboard.
 
 ---
 
