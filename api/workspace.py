@@ -228,8 +228,15 @@ async def handle_search(request: Request) -> JSONResponse:
     fact_rows: list = []
     conflict_rows: list = []
     agent_rows: list = []
+    storage_bytes: int = 0
     try:
         async with pool.acquire() as conn:
+            ws_row = await conn.fetchrow(
+                f"SELECT storage_bytes FROM {SCHEMA}.workspaces WHERE engram_id = $1",
+                engram_id,
+            )
+            if ws_row:
+                storage_bytes = ws_row["storage_bytes"] or 0
             fact_rows = await conn.fetch(
                 f"""SELECT id, lineage_id, content, scope, confidence, fact_type,
                           committed_at, valid_until, memory_op, supersedes_fact_id, durability
@@ -266,7 +273,7 @@ async def handle_search(request: Request) -> JSONResponse:
     agents = [{k: _ser(v) for k, v in dict(r).items()} for r in agent_rows]
 
     return JSONResponse(
-        {"facts": facts, "conflicts": conflicts, "agents": agents, "workspace_id": engram_id},
+        {"facts": facts, "conflicts": conflicts, "agents": agents, "workspace_id": engram_id, "storage_bytes": storage_bytes},
         headers={"Access-Control-Allow-Origin": "*"},
     )
 
@@ -334,8 +341,15 @@ async def handle_session_search(request: Request) -> JSONResponse:
     fact_rows: list = []
     conflict_rows: list = []
     agent_rows: list = []
+    storage_bytes: int = 0
     try:
         async with pool.acquire() as conn:
+            ws_row = await conn.fetchrow(
+                f"SELECT storage_bytes FROM {SCHEMA}.workspaces WHERE engram_id = $1",
+                engram_id,
+            )
+            if ws_row:
+                storage_bytes = ws_row["storage_bytes"] or 0
             fact_rows = await conn.fetch(
                 f"""SELECT id, lineage_id, content, scope, confidence, fact_type,
                           committed_at, valid_until, memory_op, supersedes_fact_id, durability
@@ -372,7 +386,7 @@ async def handle_session_search(request: Request) -> JSONResponse:
     agents = [{k: _ser(v) for k, v in dict(r).items()} for r in agent_rows]
 
     return JSONResponse(
-        {"facts": facts, "conflicts": conflicts, "agents": agents, "workspace_id": engram_id},
+        {"facts": facts, "conflicts": conflicts, "agents": agents, "workspace_id": engram_id, "storage_bytes": storage_bytes},
         headers={"Access-Control-Allow-Origin": "*"},
     )
 

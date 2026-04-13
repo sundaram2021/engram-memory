@@ -402,6 +402,7 @@ def _render_dashboard() -> str:
     .stat-ring { display: none; }
     .stat-card:nth-child(1) .stat-num { color: var(--em4); }
     .stat-card:nth-child(3) .stat-num { color: var(--yellow); }
+    .stat-card:nth-child(4) .stat-num { color: var(--blue); }
 
     /* Tabs */
     .tabs { display: flex; gap: 0; border-bottom: 1px solid rgba(255,255,255,0.06);
@@ -1591,12 +1592,13 @@ function renderDetail() {
   const active = (facts||[]).filter(f => !f.valid_until).length;
   const retired = (facts||[]).filter(f => f.valid_until).length;
   const openC = (conflicts||[]).filter(c => c.status === 'open').length;
+  const storageMB = ((WS_DATA.storage_bytes || 0) / (1024 * 1024)).toFixed(2);
 
   document.getElementById('stats-row').innerHTML = `
     <div class="stat-card"><div class="stat-num" data-target="${active}">0</div><div class="stat-label">Active Facts</div></div>
     <div class="stat-card"><div class="stat-num" data-target="${retired}">0</div><div class="stat-label">Retired</div></div>
     <div class="stat-card"><div class="stat-num" data-target="${openC}">0</div><div class="stat-label">Open Conflicts</div></div>
-    <div class="stat-card"><div class="stat-num" data-target="${(agents||[]).length}">0</div><div class="stat-label">Agents</div></div>
+    <div class="stat-card"><div class="stat-num" id="storage-stat">${storageMB}</div><div class="stat-label">Storage (MB)</div></div>
   `;
   // Animate stat counters
   document.querySelectorAll('.stat-num[data-target]').forEach(el => {
