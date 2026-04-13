@@ -284,7 +284,7 @@ class PostgresStorage(BaseStorage):
         if not ids:
             return {}
         placeholders = ", ".join(f"${i + 2}" for i in range(len(ids)))
-        async with self.pool.acquire() as conn:
+        async with self.acquire() as conn:
             rows = await conn.fetch(
                 f"SELECT * FROM facts WHERE workspace_id = $1 AND id IN ({placeholders})",
                 self.workspace_id,
@@ -294,7 +294,7 @@ class PostgresStorage(BaseStorage):
 
     async def get_conflicting_fact_ids(self, fact_id: str) -> set[str]:
         """Return all fact IDs that already have any conflict (any status) with fact_id."""
-        async with self.pool.acquire() as conn:
+        async with self.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT fact_a_id, fact_b_id FROM conflicts "
                 "WHERE workspace_id = $1 AND (fact_a_id = $2 OR fact_b_id = $2)",
@@ -904,7 +904,7 @@ class PostgresStorage(BaseStorage):
     async def get_workspace_stats(self) -> dict:
         """Return aggregate workspace statistics (Postgres implementation)."""
         ws = self.workspace_id
-        async with self.pool.acquire() as conn:
+        async with self.acquire() as conn:
             # facts totals
             row = await conn.fetchrow(
                 "SELECT COUNT(*) AS total, "
@@ -1073,7 +1073,7 @@ class PostgresStorage(BaseStorage):
         return _row_to_dict(row) if row else None
 
     async def consume_invite_key(self, key_hash: str) -> dict | None:
-        async with self.pool.acquire() as conn:
+        async with self.acquire() as conn:
             row = await conn.fetchrow(
                 "UPDATE invite_keys SET uses_remaining = uses_remaining - 1 "
                 "WHERE key_hash = $1 "

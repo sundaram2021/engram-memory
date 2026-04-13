@@ -234,6 +234,32 @@ async def _get_pool() -> Any:
     return _pool
 
 
+class _SafeConn:
+    """Context manager that guarantees search_path is set on every acquire.
+
+    Neon serverless Postgres may reset connection state between requests,
+    so the pool ``init`` callback alone is not reliable.
+    """
+
+    def __init__(self, pool: Any) -> None:
+        self._pool = pool
+        self._conn: Any = None
+
+    async def __aenter__(self) -> Any:
+        self._conn = await self._pool.acquire()
+        await self._conn.execute(f"SET search_path TO {SCHEMA}, public")
+        return self._conn
+
+    async def __aexit__(self, *args: Any) -> None:
+        if self._conn:
+            await self._pool.release(self._conn)
+
+
+def _safe(pool: Any) -> _SafeConn:
+    """Return a context manager that acquires a connection with search_path set."""
+    return _SafeConn(pool)
+
+
 # ── Invite key crypto (self-contained, matches workspace.py) ─────────
 
 _TEAM_ID_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -361,7 +387,7 @@ async def _detect_conflicts(
         if not new_nums and not new_ents:
             return
 
-        async with pool.acquire() as conn:
+        async with _safe(pool) as conn:
             existing = await conn.fetch(
                 """SELECT id, content FROM facts
                    WHERE workspace_id = $1 AND scope = $2 AND valid_until IS NULL
@@ -405,7 +431,7 @@ async def _detect_conflicts(
 
 async def _tool_debug_schema(pool: Any) -> dict:
     """Debug: show what tables exist in the engram schema."""
-    async with pool.acquire() as conn:
+    async with _safe(pool) as conn:
         rows = await conn.fetch(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = $1",
             SCHEMA,
@@ -434,7 +460,7 @@ async def _tool_status(workspace_id: str | None, pool: Any) -> dict:
                 "• Join a teammate's workspace — paste the invite key they shared with you"
             ),
         }
-    async with pool.acquire() as conn:
+    async with _safe(pool) as conn:
         ws = await conn.fetchrow(
             "SELECT engram_id, anonymous_mode, key_generation, terms_accepted FROM workspaces WHERE engram_id = $1",
             workspace_id,
@@ -463,7 +489,7 @@ async def _tool_init(pool: Any, anonymous_mode: bool = False, anon_agents: bool 
     invite_key, key_hash = _generate_invite_key(engram_id, expires_days=3650, uses_remaining=1000)
     expires_ts = datetime.fromtimestamp(time.time() + 3650 * 86400, tz=timezone.utc)
 
-    async with pool.acquire() as conn:
+    async with _safe(pool) as conn:
         await conn.execute(
             "INSERT INTO workspaces (engram_id, anonymous_mode, anon_agents) VALUES ($1, $2, $3)",
             engram_id,
@@ -528,13 +554,13 @@ async def _tool_join(invite_key: str, pool: Any) -> dict:
     engram_id = payload["engram_id"]
     key_hash = _invite_key_hash(invite_key)
 
-    async with pool.acquire() as conn:
+    async with _safe(pool) as conn:
         row = await conn.fetchrow("SELECT engram_id FROM invite_keys WHERE key_hash = $1", key_hash)
         if not row:
             return {"status": "error", "message": "Invite key not found or revoked"}
 
     # Auto-accept terms on join — the terms are presented in the response
-    async with pool.acquire() as conn:
+    async with _safe(pool) as conn:
         await conn.execute(
             "UPDATE workspaces SET terms_accepted = true WHERE engram_id = $1",
             engram_id,
@@ -599,7 +625,7 @@ async def _tool_commit(
     supersedes_id: str | None = None
 
     # ── Quota check ──────────────────────────────────────────────────
-    async with pool.acquire() as conn:
+    async with _safe(pool) as conn:
         ws_row = await conn.fetchrow(
             "SELECT paused, storage_bytes, plan, stripe_customer_id FROM workspaces WHERE engram_id = $1",
             workspace_id,
@@ -614,7 +640,7 @@ async def _tool_commit(
             ),
         }
 
-    async with pool.acquire() as conn:
+    async with _safe(pool) as conn:
         if operation == "delete":
             await conn.execute(
                 "UPDATE facts SET valid_until = $1 WHERE workspace_id = $2 AND scope = $3 AND valid_until IS NULL",
@@ -703,7 +729,7 @@ async def _tool_query(
     fact_type: str | None = None,
     limit: int = 10,
 ) -> dict:
-    async with pool.acquire() as conn:
+    async with _safe(pool) as conn:
         conds = ["workspace_id = $1", "valid_until IS NULL"]
         args: list[Any] = [workspace_id]
         idx = 2
@@ -750,7 +776,7 @@ async def _tool_conflicts(
     scope: str | None = None,
     status: str = "open",
 ) -> dict:
-    async with pool.acquire() as conn:
+    async with _safe(pool) as conn:
         conds = ["c.workspace_id = $1", "c.status = $2"]
         args: list[Any] = [workspace_id, status]
         idx = 3
@@ -791,7 +817,7 @@ async def _tool_resolve(
     winning_claim_id: str | None = None,
 ) -> dict:
     now = datetime.now(timezone.utc)
-    async with pool.acquire() as conn:
+    async with _safe(pool) as conn:
         row = await conn.fetchrow(
             "SELECT id FROM conflicts WHERE id = $1 AND workspace_id = $2",
             conflict_id,
@@ -825,7 +851,7 @@ async def _tool_resolve(
 
 
 async def _tool_reset_invite_key(workspace_id: str, pool: Any) -> dict:
-    async with pool.acquire() as conn:
+    async with _safe(pool) as conn:
         ws = await conn.fetchrow(
             "SELECT key_generation FROM workspaces WHERE engram_id = $1", workspace_id
         )
@@ -871,7 +897,7 @@ async def _tool_reset_invite_key(workspace_id: str, pool: Any) -> dict:
 
 async def _tool_accept_terms(workspace_id: str, pool: Any) -> dict:
     """Record that the user has accepted the Engram terms of service."""
-    async with pool.acquire() as conn:
+    async with _safe(pool) as conn:
         await conn.execute(
             "UPDATE workspaces SET terms_accepted = true WHERE engram_id = $1",
             workspace_id,
