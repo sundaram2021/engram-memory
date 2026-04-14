@@ -21,7 +21,7 @@ Two schemas are maintained:
 - POSTGRES_SCHEMA_SQL: PostgreSQL (team mode, asyncpg)
 """
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # Incremental ALTER TABLE migrations keyed by target version.
 MIGRATIONS: dict[int, list[str]] = {
@@ -129,6 +129,19 @@ MIGRATIONS: dict[int, list[str]] = {
         # Workspace display name and description (issue #64)
         "ALTER TABLE workspaces ADD COLUMN display_name TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE workspaces ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+    ],
+    10: [
+        # Usage metering for Stripe integration (issue #87)
+        """CREATE TABLE IF NOT EXISTS usage_events (
+            id              TEXT PRIMARY KEY,
+            workspace_id    TEXT NOT NULL,
+            event_type      TEXT NOT NULL,
+            quantity        INTEGER NOT NULL DEFAULT 1,
+            billing_period  TEXT NOT NULL,
+            created_at      TEXT NOT NULL,
+            synced_to_stripe INTEGER NOT NULL DEFAULT 0
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_usage_events_workspace_period ON usage_events(workspace_id, billing_period)",
     ],
 }
 

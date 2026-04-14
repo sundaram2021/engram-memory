@@ -417,39 +417,21 @@ class BaseStorage(ABC):
         limit: int = 100,
     ) -> list[dict]: ...
 
-    # ── GDPR subject-erasure methods ──────────────────────────────────
+    @abstractmethod
+    async def record_usage_event(
+        self, event_type: str, quantity: int = 1, billing_period: str | None = None
+    ) -> None: ...
 
     @abstractmethod
-    async def gdpr_soft_erase_agent(self, agent_id: str) -> dict[str, int]:
-        """Soft-erase all PII for agent_id in this workspace.
-
-        Redacts engineer name and provenance on every fact version, scrubs
-        free-text fields on related conflicts, anonymises the agents-table
-        row, and scrubs the audit log.  Fact content and validity are
-        preserved so the knowledge base remains coherent.
-
-        Returns a dict of affected-row counts keyed by table/operation.
-        """
-        ...
+    async def get_usage_events(
+        self, event_type: str | None = None, billing_period: str | None = None
+    ) -> list[dict]: ...
 
     @abstractmethod
-    async def gdpr_hard_erase_agent(self, agent_id: str) -> dict[str, int]:
-        """Hard-erase all data for agent_id in this workspace.
+    async def get_unsynced_usage_events(self, billing_period: str) -> list[dict]: ...
 
-        In addition to the soft-erase redaction this:
-        - Replaces fact content with a per-row placeholder and clears
-          keywords, entities, and the embedding vector so the fact can
-          never be retrieved by content or semantic search.
-        - Closes the validity window on all current facts (retires them).
-        - Dismisses every open conflict that references an erased fact,
-          marking it with resolution_type='gdpr_erasure'.
-        - Scrubs free-text on already-resolved conflicts too.
-        - Deletes scope-permission rows for the agent.
-        - Nulls owner_agent_id on any scopes owned by the agent.
-
-        Returns a dict of affected-row counts keyed by table/operation.
-        """
-        ...
+    @abstractmethod
+    async def mark_usage_events_synced(self, event_ids: list[str]) -> None: ...
 
 
 class SQLiteStorage(BaseStorage):
@@ -2011,245 +1993,68 @@ class SQLiteStorage(BaseStorage):
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
 
-    async def generate_agents_md(self) -> str:
-        """Generate AGENTS.md content from workspace facts.
+    async def record_usage_event(
+        self, event_type: str, quantity: int = 1, billing_period: str | None = None
+    ) -> None:
+        import uuid
 
-        Creates a CONTRIBUTING.md-style document with project context,
-        key facts, and important guidelines extracted from workspace memory.
-        """
-        current_facts = await self.get_current_facts_in_scope(limit=1000)
+        if billing_period is None:
+            from datetime import datetime
 
-        lines = [
-            "# AGENTS.md - Agent Guidelines",
-            "",
-            "This file is auto-generated from workspace knowledge.",
-            "",
-            "## Project Context",
-            "",
-        ]
+            now = datetime.now(timezone.utc)
+            billing_period = f"{now.year}-{now.month:02d}"
 
-        scopes: dict[str, list[dict]] = {}
-        for fact in current_facts:
-            scope = fact.get("scope", "general")
-            if scope not in scopes:
-                scopes[scope] = []
-            scopes[scope].append(fact)
-
-        main_scopes = ["general", "project", "architecture", "setup", "guidelines"]
-        for scope in main_scopes:
-            if scope in scopes and scopes[scope]:
-                lines.append(f"## {scope.title()}")
-                lines.append("")
-                for fact in scopes[scope][:5]:
-                    content = fact.get("content", "")[:200]
-                    lines.append(f"- {content}")
-                lines.append("")
-
-        lines.append("## Recent Knowledge")
-        lines.append("")
-        for fact in current_facts[:10]:
-            content = fact.get("content", "")[:150]
-            scope = fact.get("scope", "")
-            lines.append(f"- [{scope}] {content}")
-        lines.append("")
-
-        return "\n".join(lines)
-
-    # ── GDPR subject-erasure ─────────────────────────────────────────
-
-    async def gdpr_soft_erase_agent(self, agent_id: str) -> dict[str, int]:
-        """Soft-erase: redact PII, preserve fact content and validity."""
-        stats: dict[str, int] = {
-            "facts_updated": 0,
-            "conflicts_scrubbed": 0,
-            "agents_updated": 0,
-            "conflicts_closed": 0,
-            "scope_permissions_deleted": 0,
-            "scopes_updated": 0,
-            "audit_rows_scrubbed": 0,
-        }
-
-        # 1. Redact engineer + provenance on all fact versions
-        cur = await self.db.execute(
-            "UPDATE facts SET engineer = '[redacted]', provenance = NULL"
-            " WHERE agent_id = ? AND workspace_id = ?",
-            (agent_id, self.workspace_id),
+        cursor = await self.db.execute(
+            "INSERT INTO usage_events (id, workspace_id, event_type, quantity, billing_period, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid.uuid4()),
+                self.workspace_id,
+                event_type,
+                quantity,
+                billing_period,
+                _now_iso(),
+            ),
         )
-        stats["facts_updated"] = cur.rowcount
-
-        # 2. Collect fact IDs belonging to this agent
-        cur = await self.db.execute(
-            "SELECT id FROM facts WHERE agent_id = ? AND workspace_id = ?",
-            (agent_id, self.workspace_id),
-        )
-        fact_ids = {r["id"] for r in await cur.fetchall()}
-
-        # 3. Scrub conflict free-text for conflicts touching agent's facts
-        if fact_ids:
-            placeholders = ",".join("?" * len(fact_ids))
-            cur = await self.db.execute(
-                f"""UPDATE conflicts
-                    SET explanation = '[redacted]',
-                        suggested_resolution = NULL,
-                        suggested_resolution_type = NULL,
-                        suggested_winning_fact_id = NULL,
-                        suggestion_reasoning = NULL,
-                        suggestion_generated_at = NULL
-                    WHERE workspace_id = ?
-                      AND (fact_a_id IN ({placeholders}) OR fact_b_id IN ({placeholders}))""",
-                (self.workspace_id, *fact_ids, *fact_ids),
-            )
-            stats["conflicts_scrubbed"] = cur.rowcount
-
-        # 4. Redact agents table
-        cur = await self.db.execute(
-            "UPDATE agents SET engineer = '[redacted]' WHERE agent_id = ? AND workspace_id = ?",
-            (agent_id, self.workspace_id),
-        )
-        stats["agents_updated"] = cur.rowcount
-
-        # 5. Scrub audit log rows where agent_id matches
-        cur = await self.db.execute(
-            "UPDATE audit_log SET agent_id = NULL WHERE agent_id = ? AND workspace_id = ?",
-            (agent_id, self.workspace_id),
-        )
-        stats["audit_rows_scrubbed"] = cur.rowcount
-
         await self.db.commit()
-        return stats
 
-    async def gdpr_hard_erase_agent(self, agent_id: str) -> dict[str, int]:
-        """Hard-erase: wipe content, close validity, dismiss open conflicts."""
-        now = _now_iso()
-        stats: dict[str, int] = {
-            "facts_updated": 0,
-            "conflicts_closed": 0,
-            "conflicts_scrubbed": 0,
-            "agents_updated": 0,
-            "scope_permissions_deleted": 0,
-            "scopes_updated": 0,
-            "audit_rows_scrubbed": 0,
-        }
+    async def get_usage_events(
+        self, event_type: str | None = None, billing_period: str | None = None
+    ) -> list[dict]:
+        conditions = ["workspace_id = ?"]
+        params: list[Any] = [self.workspace_id]
 
-        # 1. Collect all fact IDs for this agent
-        cur = await self.db.execute(
-            "SELECT id, valid_until FROM facts WHERE agent_id = ? AND workspace_id = ?",
-            (agent_id, self.workspace_id),
+        if event_type:
+            conditions.append("event_type = ?")
+            params.append(event_type)
+        if billing_period:
+            conditions.append("billing_period = ?")
+            params.append(billing_period)
+
+        where = " AND ".join(conditions)
+        cursor = await self.db.execute(
+            f"SELECT * FROM usage_events WHERE {where} ORDER BY created_at DESC",
+            params,
         )
-        rows = await cur.fetchall()
-        fact_ids = [r["id"] for r in rows]
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
 
-        if fact_ids:
-            # 2. Wipe content, keywords, entities, embedding; close open validity windows
-            for row in rows:
-                fid = row["id"]
-                new_valid_until = row["valid_until"] if row["valid_until"] is not None else now
-                await self.db.execute(
-                    """UPDATE facts
-                       SET content = ?,
-                           content_hash = ?,
-                           engineer = '[redacted]',
-                           provenance = NULL,
-                           keywords = NULL,
-                           entities = NULL,
-                           embedding = NULL,
-                           valid_until = ?
-                       WHERE id = ? AND workspace_id = ?""",
-                    (
-                        f"[gdpr:erased:{fid}]",
-                        f"gdpr:{fid}",
-                        new_valid_until,
-                        fid,
-                        self.workspace_id,
-                    ),
-                )
-            stats["facts_updated"] = len(fact_ids)
-
-            # 3. Sync FTS — delete erased facts from the FTS index
-            placeholders = ",".join("?" * len(fact_ids))
-            cur2 = await self.db.execute(
-                f"SELECT rowid FROM facts WHERE id IN ({placeholders}) AND workspace_id = ?",
-                (*fact_ids, self.workspace_id),
-            )
-            rowids = [r[0] for r in await cur2.fetchall()]
-            for rowid in rowids:
-                await self.db.execute("DELETE FROM facts_fts WHERE rowid = ?", (rowid,))
-
-            # 4. Dismiss open conflicts referencing erased facts
-            cur = await self.db.execute(
-                f"""UPDATE conflicts
-                    SET status = 'dismissed',
-                        resolution_type = 'gdpr_erasure',
-                        resolution = '[redacted]',
-                        explanation = '[redacted]',
-                        suggested_resolution = NULL,
-                        suggested_resolution_type = NULL,
-                        suggested_winning_fact_id = NULL,
-                        suggestion_reasoning = NULL,
-                        suggestion_generated_at = NULL
-                    WHERE workspace_id = ?
-                      AND status = 'open'
-                      AND (fact_a_id IN ({placeholders}) OR fact_b_id IN ({placeholders}))""",
-                (self.workspace_id, *fact_ids, *fact_ids),
-            )
-            stats["conflicts_closed"] = cur.rowcount
-
-            # 5. Scrub free-text on already-resolved conflicts
-            cur = await self.db.execute(
-                f"""UPDATE conflicts
-                    SET explanation = '[redacted]',
-                        resolution = '[redacted]',
-                        suggested_resolution = NULL,
-                        suggested_resolution_type = NULL,
-                        suggested_winning_fact_id = NULL,
-                        suggestion_reasoning = NULL,
-                        suggestion_generated_at = NULL
-                    WHERE workspace_id = ?
-                      AND status != 'open'
-                      AND (fact_a_id IN ({placeholders}) OR fact_b_id IN ({placeholders}))""",
-                (self.workspace_id, *fact_ids, *fact_ids),
-            )
-            stats["conflicts_scrubbed"] = cur.rowcount
-
-        # 6. Redact agents table
-        cur = await self.db.execute(
-            "UPDATE agents SET engineer = '[redacted]' WHERE agent_id = ? AND workspace_id = ?",
-            (agent_id, self.workspace_id),
+    async def get_unsynced_usage_events(self, billing_period: str) -> list[dict]:
+        cursor = await self.db.execute(
+            "SELECT * FROM usage_events WHERE workspace_id = ? AND billing_period = ? AND synced_to_stripe = 0 ORDER BY created_at",
+            (self.workspace_id, billing_period),
         )
-        stats["agents_updated"] = cur.rowcount
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
 
-        # 7. Delete scope_permissions (no workspace_id column)
-        cur = await self.db.execute(
-            "DELETE FROM scope_permissions WHERE agent_id = ?",
-            (agent_id,),
+    async def mark_usage_events_synced(self, event_ids: list[str]) -> None:
+        if not event_ids:
+            return
+        placeholders = ",".join("?" * len(event_ids))
+        cursor = await self.db.execute(
+            f"UPDATE usage_events SET synced_to_stripe = 1 WHERE id IN ({placeholders})",
+            event_ids,
         )
-        stats["scope_permissions_deleted"] = cur.rowcount
-
-        # 8. Null owner_agent_id on scopes owned by this agent
-        cur = await self.db.execute(
-            "UPDATE scopes SET owner_agent_id = NULL WHERE owner_agent_id = ? AND workspace_id = ?",
-            (agent_id, self.workspace_id),
-        )
-        stats["scopes_updated"] = cur.rowcount
-
-        # 9. Scrub audit log — by actor and by fact_id
-        cur = await self.db.execute(
-            "UPDATE audit_log SET agent_id = NULL WHERE agent_id = ? AND workspace_id = ?",
-            (agent_id, self.workspace_id),
-        )
-        scrubbed = cur.rowcount
-        if fact_ids:
-            placeholders = ",".join("?" * len(fact_ids))
-            cur = await self.db.execute(
-                f"UPDATE audit_log SET fact_id = NULL"
-                f" WHERE fact_id IN ({placeholders}) AND workspace_id = ?",
-                (*fact_ids, self.workspace_id),
-            )
-            scrubbed += cur.rowcount
-        stats["audit_rows_scrubbed"] = scrubbed
-
         await self.db.commit()
-        return stats
 
 
 def _now_iso() -> str:
