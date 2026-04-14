@@ -763,10 +763,15 @@ class PostgresStorage(BaseStorage):
             )
 
     async def update_fact_entities(self, fact_id: str, entities_json: str) -> None:
+        # entities is JSONB in PostgreSQL; asyncpg requires a Python object, not a raw string.
+        try:
+            entities_value = json.loads(entities_json)
+        except Exception:
+            entities_value = []
         async with self.acquire() as conn:
             await conn.execute(
                 "UPDATE facts SET entities = $1 WHERE id = $2 AND workspace_id = $3",
-                entities_json,
+                entities_value,
                 fact_id,
                 self.workspace_id,
             )
@@ -777,7 +782,7 @@ class PostgresStorage(BaseStorage):
                 """SELECT id, content, scope FROM facts
                    WHERE workspace_id = $1
                      AND valid_until IS NULL
-                     AND (entities IS NULL OR entities = '[]' OR entities = '')
+                     AND (entities IS NULL OR entities = '[]'::jsonb OR entities = ''::jsonb)
                    ORDER BY committed_at DESC
                    LIMIT $2 OFFSET $3""",
                 self.workspace_id,

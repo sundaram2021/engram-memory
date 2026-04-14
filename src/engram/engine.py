@@ -25,6 +25,21 @@ from engram.storage import BaseStorage
 logger = logging.getLogger("engram")
 
 
+def _load_entities(raw: Any) -> list[dict[str, Any]]:
+    """Return a parsed entity list from a fact row's entities field.
+
+    SQLite stores entities as a JSON string; PostgreSQL (JSONB) returns a
+    Python list directly.  Both cases are handled here so callers never need
+    to branch on storage backend.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    # str (SQLite) or bytes
+    return json.loads(raw) if raw else []
+
+
 class EngramEngine:
     """Core engine coordinating commit, query, detection, and resolution."""
 
@@ -604,7 +619,7 @@ class EngramEngine:
 
             # Phase 1: Entity density (facts with structured entities are more actionable)
             try:
-                entities = json.loads(fact.get("entities") or "[]")
+                entities = _load_entities(fact.get("entities"))
                 entity_density = min(1.0, len(entities) / 5.0)  # cap at 5 entities
             except (json.JSONDecodeError, TypeError):
                 entity_density = 0.0
@@ -913,7 +928,7 @@ class EngramEngine:
         candidates = await self.storage.get_current_facts_in_scope(scope=scope, limit=50)
         count = 0
         for fact in candidates:
-            stored = json.loads(fact.get("entities") or "[]")
+            stored = _load_entities(fact.get("entities"))
             fresh = extract_entities(fact["content"])
 
             # Determine which entities the fresh pass found that are not yet stored.
@@ -1447,7 +1462,7 @@ class EngramEngine:
                     fact_id,
                 )
 
-        entities = json.loads(fact.get("entities") or "[]")
+        entities = _load_entities(fact.get("entities"))
         now = datetime.now(timezone.utc).isoformat()
 
         # Pre-fetch all fact IDs that already have a conflict with fact_id.
@@ -1576,7 +1591,7 @@ class EngramEngine:
                 continue
             if candidate["id"] in tier0_flagged or candidate["id"] in tier2b_flagged:
                 continue
-            c_entities = json.loads(candidate.get("entities") or "[]")
+            c_entities = _load_entities(candidate.get("entities"))
             for e_new in entities:
                 if e_new.get("type") != "numeric" or e_new.get("value") is None:
                     continue
