@@ -894,34 +894,48 @@ class EngramEngine:
     # ── engram_conflicts ─────────────────────────────────────────────
 
     async def _ensure_detection_current(self, scope: str | None = None) -> int:
-        """Re-extract entities and run detection for facts that slipped through.
+        """Merge fresh entity extraction into stored entities and re-detect.
 
-        Facts committed before the entity extractor was updated (or before a
-        new pattern was added) have entities = '[]'.  This method finds them,
-        backfills their entities, and runs detection inline so that
-        get_conflicts always reflects the current state of the extractor.
+        A fact can have *partial* entities if it was committed before a new
+        extraction pattern was added.  For example, "maximum of 3 projects"
+        committed before the limit-pattern was added has entities =
+        '[{"name":"MUST","type":"config_key"}]' — non-empty, so the empty-
+        entity backfill skips it, but it is still missing project_limit=3.
+
+        This method re-runs extraction on every current fact in scope, compares
+        the fresh result against what is stored, and writes back any *new*
+        entities.  Detection then runs for any fact whose entities changed, so
+        Tier 2 sees up-to-date entities on both sides of a comparison.
 
         Limited to 50 facts per call so it does not block request handling.
-        Returns the number of facts re-processed.
+        Returns the number of facts whose entities were updated.
         """
-        candidates = await self.storage.get_facts_with_empty_entities(limit=50)
-        if scope:
-            candidates = [
-                f for f in candidates if f["scope"] == scope or f["scope"].startswith(scope + "/")
-            ]
+        candidates = await self.storage.get_current_facts_in_scope(scope=scope, limit=50)
         count = 0
         for fact in candidates:
-            new_entities = extract_entities(fact["content"])
-            if not new_entities:
-                continue
-            await self.storage.update_fact_entities(fact["id"], json.dumps(new_entities))
+            stored = json.loads(fact.get("entities") or "[]")
+            fresh = extract_entities(fact["content"])
+
+            # Determine which entities the fresh pass found that are not yet stored.
+            stored_keys = {(e["name"], e["type"]) for e in stored}
+            added = [e for e in fresh if (e["name"], e["type"]) not in stored_keys]
+
+            if not added:
+                continue  # Nothing new — fact is already up to date.
+
+            merged = stored + added
+            await self.storage.update_fact_entities(fact["id"], json.dumps(merged))
             try:
                 await self._run_detection(fact["id"])
             except Exception:
                 logger.exception("On-demand detection failed for fact %s", fact["id"])
             count += 1
+
         if count:
-            logger.info("On-demand detection: processed %d facts with stale entities", count)
+            logger.info(
+                "On-demand detection: merged new entities and re-ran detection for %d facts",
+                count,
+            )
         return count
 
     async def get_conflicts(
