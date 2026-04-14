@@ -908,62 +908,103 @@ class EngramEngine:
 
     # ── engram_conflicts ─────────────────────────────────────────────
 
-    async def _ensure_detection_current(self, scope: str | None = None) -> int:
-        """Merge fresh entity extraction into stored entities and re-detect.
+    async def _sync_conflict_scan(self, scope: str | None = None) -> int:
+        """Synchronous pairwise conflict scan — runs every time get_conflicts is called.
 
-        A fact can have *partial* entities if it was committed before a new
-        extraction pattern was added.  For example, "maximum of 3 projects"
-        committed before the limit-pattern was added has entities =
-        '[{"name":"MUST","type":"config_key"}]' — non-empty, so the empty-
-        entity backfill skips it, but it is still missing project_limit=3.
+        Does NOT rely on stored entities, background workers, or async queues.
+        For each pair of current facts it:
+          1. Re-extracts entities fresh from content (avoids all stale-entity issues)
+          2. Compares numeric entities that share the same name but have different values
+          3. Inserts any new conflict pairs not already in the conflicts table
 
-        This method re-runs extraction on every current fact in scope, compares
-        the fresh result against what is stored, and writes back any *new*
-        entities.  Detection then runs for any fact whose entities changed, so
-        Tier 2 sees up-to-date entities on both sides of a comparison.
-
-        Limited to 50 facts per call so it does not block request handling.
-        Returns the number of facts whose entities were updated.
+        Works identically on SQLite and PostgreSQL — no json.loads on stored fields.
+        Bounded to 100 facts so it stays fast even for large workspaces.
         """
-        candidates = await self.storage.get_current_facts_in_scope(scope=scope, limit=50)
-        count = 0
-        for fact in candidates:
-            stored = _load_entities(fact.get("entities"))
-            fresh = extract_entities(fact["content"])
+        facts = await self.storage.get_current_facts_in_scope(scope=scope, limit=100)
+        if len(facts) < 2:
+            return 0
 
-            # Determine which entities the fresh pass found that are not yet stored.
-            stored_keys = {(e["name"], e["type"]) for e in stored}
-            added = [e for e in fresh if (e["name"], e["type"]) not in stored_keys]
+        # Re-extract entities fresh for every fact — never trust stored state.
+        fresh: dict[str, list[dict[str, Any]]] = {
+            f["id"]: extract_entities(f["content"]) for f in facts
+        }
 
-            if not added:
-                continue  # Nothing new — fact is already up to date.
+        now = datetime.now(timezone.utc).isoformat()
+        inserted = 0
 
-            merged = stored + added
-            await self.storage.update_fact_entities(fact["id"], json.dumps(merged))
-            try:
-                await self._run_detection(fact["id"])
-            except Exception:
-                logger.exception("On-demand detection failed for fact %s", fact["id"])
-            count += 1
+        for i, a in enumerate(facts):
+            a_numeric = {
+                e["name"]: e["value"]
+                for e in fresh[a["id"]]
+                if e["type"] == "numeric" and e.get("value") is not None
+            }
+            if not a_numeric:
+                continue
 
-        if count:
-            logger.info(
-                "On-demand detection: merged new entities and re-ran detection for %d facts",
-                count,
-            )
-        return count
+            for b in facts[i + 1 :]:
+                # Never flag two versions of the same lineage.
+                if a.get("lineage_id") and a.get("lineage_id") == b.get("lineage_id"):
+                    continue
+
+                b_numeric = {
+                    e["name"]: e["value"]
+                    for e in fresh[b["id"]]
+                    if e["type"] == "numeric" and e.get("value") is not None
+                }
+
+                for name, val_a in a_numeric.items():
+                    if name not in b_numeric:
+                        continue
+                    val_b = b_numeric[name]
+                    if str(val_a) == str(val_b):
+                        continue
+
+                    # Conflict: same concept, different numeric values.
+                    already = await self.storage.conflict_exists(a["id"], b["id"])
+                    if already:
+                        continue
+
+                    label_a = f"{val_a}" if val_a != -1 else "unlimited"
+                    label_b = f"{val_b}" if val_b != -1 else "unlimited"
+                    await self.storage.insert_conflict(
+                        {
+                            "id": uuid.uuid4().hex,
+                            "fact_a_id": a["id"],
+                            "fact_b_id": b["id"],
+                            "detected_at": now,
+                            "detection_tier": "tier2_numeric",
+                            "nli_score": None,
+                            "explanation": (
+                                f"Conflicting '{name}': "
+                                f'"{a["content"][:60]}…" says {label_a}, '
+                                f'"{b["content"][:60]}…" says {label_b}'
+                            ),
+                            "severity": "high",
+                            "status": "open",
+                        }
+                    )
+                    inserted += 1
+                    logger.info(
+                        "Conflict inserted: %s=%s vs %s between facts %s and %s",
+                        name,
+                        label_a,
+                        label_b,
+                        a["id"][:8],
+                        b["id"][:8],
+                    )
+
+        return inserted
 
     async def get_conflicts(
         self, scope: str | None = None, status: str = "open"
     ) -> list[dict[str, Any]]:
         """Get conflicts, optionally filtered by scope and status.
 
-        Before querying, backfills entity extraction for any facts that were
-        committed before the entity extractor recognised their patterns.  This
-        makes conflict detection self-healing: stale facts are caught on the
-        first call to get_conflicts rather than requiring a server restart.
+        Runs a synchronous pairwise scan before querying so that facts
+        committed before the current entity extractor version are always
+        caught — no background worker or stored entity state required.
         """
-        await self._ensure_detection_current(scope=scope)
+        await self._sync_conflict_scan(scope=scope)
         rows = await self.storage.get_conflicts(scope=scope, status=status)
         results = []
         for r in rows:
