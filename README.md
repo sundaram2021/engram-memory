@@ -20,6 +20,10 @@ When your team works in the same codebase, your AI agents work in parallel — a
 
 Every agent's messages are automatically committed to shared memory as facts. No manual step. No copy-pasting context between sessions. The team's collective knowledge accumulates and every agent benefits from it instantly.
 
+### Demo Video
+
+[![Watch the demo](https://img.youtube.com/vi/KFIjxyTO2q4/maxresdefault.jpg)](https://youtu.be/KFIjxyTO2q4)
+
 <video src="docs/demo-video-1.mp4" controls width="100%"></video>
 
 ---
