@@ -1647,3 +1647,117 @@ async def engram_create_rule(
         condition_value=condition_value,
         resolution_type=resolution_type,
     )
+
+
+# ── engram_grant ─────────────────────────────────────────────────────────────
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False})
+async def engram_grant(
+    agent_id: str,
+    scope: str,
+    can_read: bool = True,
+    can_write: bool = True,
+) -> dict[str, Any]:
+    """Grant an agent read/write permissions to a specific scope.
+
+    Use this to restrict agents to specific scopes - a frontend agent with
+    no write access to backend/auth, a read-only CI agent, a sandboxed
+    junior agent.
+
+    Parameters:
+    - agent_id: The agent ID to grant permissions to (e.g. 'claude-code').
+    - scope: The scope to grant access to (e.g. 'auth', 'payments/', 'docs').
+    - can_read: Whether the agent can read facts in this scope (default True).
+    - can_write: Whether the agent can commit to this scope (default True).
+
+    Returns: {agent_id, scope, can_read, can_write, granted_at}
+    """
+    if _storage is None:
+        return {"error": "Storage not initialized"}
+    await _storage.set_scope_permission(
+        agent_id=agent_id,
+        scope=scope,
+        can_read=can_read,
+        can_write=can_write,
+    )
+    return {
+        "agent_id": agent_id,
+        "scope": scope,
+        "can_read": can_read,
+        "can_write": can_write,
+        "granted_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ── engram_revoke ────────────────────────────────────────────────────────
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True})
+async def engram_revoke(
+    agent_id: str,
+    scope: str,
+) -> dict[str, Any]:
+    """Revoke all permissions for an agent in a specific scope.
+
+    Use this to remove an agent's access when they exceed their bounds
+    or when an agent is decommissioned.
+
+    Parameters:
+    - agent_id: The agent ID to revoke permissions from.
+    - scope: The scope to revoke access to.
+
+    Returns: {agent_id, scope, revoked_at}
+    """
+    if _storage is None:
+        return {"error": "Storage not initialized"}
+    await _storage.set_scope_permission(
+        agent_id=agent_id,
+        scope=scope,
+        can_read=False,
+        can_write=False,
+    )
+    return {
+        "agent_id": agent_id,
+        "scope": scope,
+        "revoked_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+# ── engram_check_permission ────────────────────────────────────────────────
+
+
+@mcp.tool(annotations={"readOnlyHint": True})
+async def engram_check_permission(
+    agent_id: str,
+    scope: str,
+) -> dict[str, Any]:
+    """Check an agent's permissions for a specific scope.
+
+    Use this to verify what access an agent has before allowing operations.
+
+    Parameters:
+    - agent_id: The agent ID to check.
+    - scope: The scope to check permissions for.
+
+    Returns: {agent_id, scope, can_read, can_write, has_permission}
+    """
+    if _storage is None:
+        return {"error": "Storage not initialized"}
+    permission = await _storage.get_scope_permission(agent_id=agent_id, scope=scope)
+    if permission is None:
+        return {
+            "agent_id": agent_id,
+            "scope": scope,
+            "can_read": True,
+            "can_write": True,
+            "has_permission": True,
+            "implicit": True,
+        }
+    return {
+        "agent_id": permission["agent_id"],
+        "scope": permission["scope"],
+        "can_read": bool(permission["can_read"]),
+        "can_write": bool(permission["can_write"]),
+        "has_permission": bool(permission["can_read"]) or bool(permission["can_write"]),
+    }
