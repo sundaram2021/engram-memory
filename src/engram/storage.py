@@ -2055,7 +2055,6 @@ class SQLiteStorage(BaseStorage):
 
         return "\n".join(lines)
 
-
     # ── GDPR subject-erasure ─────────────────────────────────────────
 
     async def gdpr_soft_erase_agent(self, agent_id: str) -> dict[str, int]:
