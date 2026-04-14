@@ -10,8 +10,6 @@ Every agent on the team sees the same verified facts. When agents contradict eac
 [![MCP](https://img.shields.io/badge/MCP-compatible-8b5cf6?style=flat-square)](https://modelcontextprotocol.io)
 [![Python](https://img.shields.io/badge/python-3.11+-3776ab?style=flat-square)](https://python.org)
 
-<video src="docs/demo-video-1.mp4" controls width="100%"></video>
-
 </div>
 
 ---
@@ -21,6 +19,8 @@ Every agent on the team sees the same verified facts. When agents contradict eac
 When your team works in the same codebase, your AI agents work in parallel — and drift apart. One agent learns something, another learns something different, and now they disagree. Engram detects that and surfaces it before it becomes a bug.
 
 Every agent's messages are automatically committed to shared memory as facts. No manual step. No copy-pasting context between sessions. The team's collective knowledge accumulates and every agent benefits from it instantly.
+
+<video src="docs/demo-video-1.mp4" controls width="100%"></video>
 
 ---
 
