@@ -158,7 +158,9 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
         """HTMX: approve the LLM-suggested resolution for a conflict."""
         conflict_id = request.path_params["conflict_id"]
         if engine is None:
-            return HTMLResponse('<p style="color:#dc2626">Engine not available</p>', status_code=503)
+            return HTMLResponse(
+                '<p style="color:#dc2626">Engine not available</p>', status_code=503
+            )
         conflict = await storage.get_conflict_by_id(conflict_id)
         if not conflict:
             return HTMLResponse('<p style="color:#dc2626">Conflict not found</p>', status_code=404)
@@ -189,7 +191,9 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
         """HTMX: dismiss a conflict as a false positive."""
         conflict_id = request.path_params["conflict_id"]
         if engine is None:
-            return HTMLResponse('<p style="color:#dc2626">Engine not available</p>', status_code=503)
+            return HTMLResponse(
+                '<p style="color:#dc2626">Engine not available</p>', status_code=503
+            )
         conflict = await storage.get_conflict_by_id(conflict_id)
         if not conflict or conflict["status"] != "open":
             full = await storage.get_conflict_with_facts(conflict_id)
@@ -874,8 +878,14 @@ def _render_facts_table(
 
 def _render_conflicts_page(conflicts: list[dict], stats: dict | None = None) -> str:
     """Render the Conflicts tab."""
-    open_count = stats.get("open", 0) if stats else sum(1 for c in conflicts if c.get("status") == "open")
-    resolved_count = stats.get("resolved", 0) if stats else sum(1 for c in conflicts if c.get("status") == "resolved")
+    open_count = (
+        stats.get("open", 0) if stats else sum(1 for c in conflicts if c.get("status") == "open")
+    )
+    resolved_count = (
+        stats.get("resolved", 0)
+        if stats
+        else sum(1 for c in conflicts if c.get("status") == "resolved")
+    )
 
     if not conflicts:
         empty_html = (
@@ -887,7 +897,11 @@ def _render_conflicts_page(conflicts: list[dict], stats: dict | None = None) -> 
         )
         cards_html = empty_html
     else:
-        cards_html = '<div class="conflict-cards">' + "".join(_render_conflict_card(c) for c in conflicts) + "</div>"
+        cards_html = (
+            '<div class="conflict-cards">'
+            + "".join(_render_conflict_card(c) for c in conflicts)
+            + "</div>"
+        )
 
     filter_form = """
     <form method="get" action="/dashboard/conflicts" class="filter-bar">
@@ -961,8 +975,14 @@ def _render_conflict_card(c: dict) -> str:
         fact_a_id = c.get("fact_a_id", "")
         fact_b_id = c.get("fact_b_id", "")
 
-    sev_badge_cls = {"high": "badge-high", "medium": "badge-medium", "low": "badge-low"}.get(severity, "badge-low")
-    status_badge_cls = {"open": "badge-open", "resolved": "badge-resolved", "dismissed": "badge-dismissed"}.get(status, "badge-dismissed")
+    sev_badge_cls = {"high": "badge-high", "medium": "badge-medium", "low": "badge-low"}.get(
+        severity, "badge-low"
+    )
+    status_badge_cls = {
+        "open": "badge-open",
+        "resolved": "badge-resolved",
+        "dismissed": "badge-dismissed",
+    }.get(status, "badge-dismissed")
 
     def _fact_box(f: dict, label: str) -> str:
         content = _esc(str(f.get("content") or ""))

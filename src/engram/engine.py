@@ -1005,7 +1005,11 @@ class EngramEngine:
                         pass
                     logger.info(
                         "Conflict detected (same-scope): %s=%s vs %s (facts %s, %s)",
-                        name, label_new, label_other, fact_id[:8], other["id"][:8],
+                        name,
+                        label_new,
+                        label_other,
+                        fact_id[:8],
+                        other["id"][:8],
                     )
 
         # ── Tier 1: NLI semantic contradiction ───────────────────────
@@ -1013,7 +1017,11 @@ class EngramEngine:
         if nli_model is not None and candidates:
             new_emb = None
             try:
-                new_emb = embeddings.bytes_to_embedding(fact.get("embedding")) if fact.get("embedding") else None
+                new_emb = (
+                    embeddings.bytes_to_embedding(fact.get("embedding"))
+                    if fact.get("embedding")
+                    else None
+                )
             except Exception:
                 pass
 
@@ -1041,7 +1049,9 @@ class EngramEngine:
                     )
                     contradiction_score = scores[0][0]
                     if contradiction_score > 0.7:
-                        severity = "high" if fact.get("agent_id") != other.get("agent_id") else "medium"
+                        severity = (
+                            "high" if fact.get("agent_id") != other.get("agent_id") else "medium"
+                        )
                         cid = uuid.uuid4().hex
                         await self.storage.insert_conflict(
                             {
@@ -1065,10 +1075,14 @@ class EngramEngine:
                             pass
                         logger.info(
                             "NLI conflict detected (score=%.2f): facts %s, %s",
-                            contradiction_score, fact_id[:8], other["id"][:8],
+                            contradiction_score,
+                            fact_id[:8],
+                            other["id"][:8],
                         )
                 except Exception:
-                    logger.debug("NLI prediction failed for facts %s, %s", fact_id[:8], other["id"][:8])
+                    logger.debug(
+                        "NLI prediction failed for facts %s, %s", fact_id[:8], other["id"][:8]
+                    )
 
         # ── Tier 2b: Cross-scope numeric conflicts ────────────────────
         if new_nums:
@@ -1102,7 +1116,9 @@ class EngramEngine:
 
                         label_new = "unlimited" if val_new == -1 else str(val_new)
                         label_other = "unlimited" if val_other == -1 else str(val_other)
-                        severity = "high" if fact.get("agent_id") != other.get("agent_id") else "medium"
+                        severity = (
+                            "high" if fact.get("agent_id") != other.get("agent_id") else "medium"
+                        )
 
                         cid = uuid.uuid4().hex
                         await self.storage.insert_conflict(
@@ -1128,7 +1144,11 @@ class EngramEngine:
                             pass
                         logger.info(
                             "Conflict detected (cross-scope): %s=%s vs %s (facts %s, %s)",
-                            name, label_new, label_other, fact_id[:8], other["id"][:8],
+                            name,
+                            label_new,
+                            label_other,
+                            fact_id[:8],
+                            other["id"][:8],
                         )
 
     async def get_conflicts(
