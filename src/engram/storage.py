@@ -368,6 +368,22 @@ class BaseStorage(ABC):
         limit: int = 100,
     ) -> list[dict]: ...
 
+    @abstractmethod
+    async def record_usage_event(
+        self, event_type: str, quantity: int = 1, billing_period: str | None = None
+    ) -> None: ...
+
+    @abstractmethod
+    async def get_usage_events(
+        self, event_type: str | None = None, billing_period: str | None = None
+    ) -> list[dict]: ...
+
+    @abstractmethod
+    async def get_unsynced_usage_events(self, billing_period: str) -> list[dict]: ...
+
+    @abstractmethod
+    async def mark_usage_events_synced(self, event_ids: list[str]) -> None: ...
+
 
 class SQLiteStorage(BaseStorage):
     """Async SQLite storage with WAL mode and FTS5."""
@@ -1708,6 +1724,69 @@ class SQLiteStorage(BaseStorage):
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+    async def record_usage_event(
+        self, event_type: str, quantity: int = 1, billing_period: str | None = None
+    ) -> None:
+        import uuid
+
+        if billing_period is None:
+            from datetime import datetime
+
+            now = datetime.now(timezone.utc)
+            billing_period = f"{now.year}-{now.month:02d}"
+
+        cursor = await self.db.execute(
+            "INSERT INTO usage_events (id, workspace_id, event_type, quantity, billing_period, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                str(uuid.uuid4()),
+                self.workspace_id,
+                event_type,
+                quantity,
+                billing_period,
+                _now_iso(),
+            ),
+        )
+        await self.db.commit()
+
+    async def get_usage_events(
+        self, event_type: str | None = None, billing_period: str | None = None
+    ) -> list[dict]:
+        conditions = ["workspace_id = ?"]
+        params: list[Any] = [self.workspace_id]
+
+        if event_type:
+            conditions.append("event_type = ?")
+            params.append(event_type)
+        if billing_period:
+            conditions.append("billing_period = ?")
+            params.append(billing_period)
+
+        where = " AND ".join(conditions)
+        cursor = await self.db.execute(
+            f"SELECT * FROM usage_events WHERE {where} ORDER BY created_at DESC",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_unsynced_usage_events(self, billing_period: str) -> list[dict]:
+        cursor = await self.db.execute(
+            "SELECT * FROM usage_events WHERE workspace_id = ? AND billing_period = ? AND synced_to_stripe = 0 ORDER BY created_at",
+            (self.workspace_id, billing_period),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def mark_usage_events_synced(self, event_ids: list[str]) -> None:
+        if not event_ids:
+            return
+        placeholders = ",".join("?" * len(event_ids))
+        cursor = await self.db.execute(
+            f"UPDATE usage_events SET synced_to_stripe = 1 WHERE id IN ({placeholders})",
+            event_ids,
+        )
+        await self.db.commit()
 
 
 def _now_iso() -> str:
