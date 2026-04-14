@@ -253,8 +253,51 @@ class PostgresStorage(BaseStorage):
                 self.workspace_id,
                 limit,
             )
-        # Return ids as a list (PostgreSQL doesn't use integer rowids like SQLite)
         return [r["id"] for r in rows]
+
+    async def generate_agents_md(self) -> str:
+        """Generate AGENTS.md content from workspace facts.
+
+        Creates a CONTRIBUTING.md-style document with project context,
+        key facts, and important guidelines extracted from workspace memory.
+        """
+        current_facts = await self.get_current_facts_in_scope(limit=1000)
+
+        lines = [
+            "# AGENTS.md - Agent Guidelines",
+            "",
+            "This file is auto-generated from workspace knowledge.",
+            "",
+            "## Project Context",
+            "",
+        ]
+
+        scopes: dict[str, list[dict]] = {}
+        for fact in current_facts:
+            scope = fact.get("scope", "general")
+            if scope not in scopes:
+                scopes[scope] = []
+            scopes[scope].append(fact)
+
+        main_scopes = ["general", "project", "architecture", "setup", "guidelines"]
+        for scope in main_scopes:
+            if scope in scopes and scopes[scope]:
+                lines.append(f"## {scope.title()}")
+                lines.append("")
+                for fact in scopes[scope][:5]:
+                    content = fact.get("content", "")[:200]
+                    lines.append(f"- {content}")
+                lines.append("")
+
+        lines.append("## Recent Knowledge")
+        lines.append("")
+        for fact in current_facts[:10]:
+            content = fact.get("content", "")[:150]
+            scope = fact.get("scope", "")
+            lines.append(f"- [{scope}] {content}")
+        lines.append("")
+
+        return "\n".join(lines)
 
     async def get_facts_by_rowids(self, rowids: list[int]) -> list[dict]:
         """In PostgreSQL mode rowids are actually fact IDs (strings) from fts_search."""
