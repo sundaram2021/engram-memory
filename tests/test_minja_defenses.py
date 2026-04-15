@@ -9,7 +9,6 @@ Clean Code principles applied:
 - Tests are independent and can run in any order
 """
 
-import pytest
 from engram.auth import CommitVelocityAnomalyDetector, RateLimiter
 
 
