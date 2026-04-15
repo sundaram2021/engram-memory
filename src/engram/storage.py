@@ -230,6 +230,21 @@ class BaseStorage(ABC):
     ) -> list[dict]: ...
 
     @abstractmethod
+    async def get_facts_added_between(
+        self, start: str, end: str, scope: str | None = None, limit: int = 1000
+    ) -> list[dict]: ...
+
+    @abstractmethod
+    async def get_facts_retired_between(
+        self, start: str, end: str, scope: str | None = None, limit: int = 1000
+    ) -> list[dict]: ...
+
+    @abstractmethod
+    async def get_conflicts_resolved_between(
+        self, start: str, end: str, scope: str | None = None, limit: int = 1000
+    ) -> list[dict]: ...
+
+    @abstractmethod
     async def ingest_remote_fact(self, fact: dict[str, Any]) -> bool: ...
 
     @abstractmethod
@@ -1293,6 +1308,87 @@ class SQLiteStorage(BaseStorage):
         where = " AND ".join(conditions)
         cursor = await self.db.execute(
             f"SELECT * FROM facts WHERE {where} ORDER BY committed_at ASC LIMIT ?",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_facts_added_between(
+        self, start: str, end: str, scope: str | None = None, limit: int = 1000
+    ) -> list[dict]:
+        """Return facts committed within a time window."""
+        conditions = ["workspace_id = ?", "committed_at >= ?", "committed_at <= ?"]
+        params: list[Any] = [self.workspace_id, start, end]
+        if scope:
+            conditions.append("(scope = ? OR scope LIKE ? || '/%')")
+            params.extend([scope, scope])
+        params.append(limit)
+        where = " AND ".join(conditions)
+        cursor = await self.db.execute(
+            f"""SELECT id, lineage_id, content, scope, confidence, fact_type,
+                       agent_id, engineer, committed_at, valid_from, valid_until,
+                       supersedes_fact_id, durability
+                FROM facts
+                WHERE {where}
+                ORDER BY committed_at ASC
+                LIMIT ?""",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_facts_retired_between(
+        self, start: str, end: str, scope: str | None = None, limit: int = 1000
+    ) -> list[dict]:
+        """Return facts whose validity window closed within a time window."""
+        conditions = ["workspace_id = ?", "valid_until >= ?", "valid_until <= ?"]
+        params: list[Any] = [self.workspace_id, start, end]
+        if scope:
+            conditions.append("(scope = ? OR scope LIKE ? || '/%')")
+            params.extend([scope, scope])
+        params.append(limit)
+        where = " AND ".join(conditions)
+        cursor = await self.db.execute(
+            f"""SELECT id, lineage_id, content, scope, confidence, fact_type,
+                       agent_id, engineer, committed_at, valid_from, valid_until,
+                       supersedes_fact_id, durability
+                FROM facts
+                WHERE {where}
+                ORDER BY valid_until ASC
+                LIMIT ?""",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_conflicts_resolved_between(
+        self, start: str, end: str, scope: str | None = None, limit: int = 1000
+    ) -> list[dict]:
+        """Return conflicts resolved or dismissed within a time window."""
+        conditions = [
+            "c.workspace_id = ?",
+            "c.resolved_at >= ?",
+            "c.resolved_at <= ?",
+            "c.status != 'open'",
+        ]
+        params: list[Any] = [self.workspace_id, start, end]
+        if scope:
+            conditions.append(
+                "(fa.scope = ? OR fa.scope LIKE ? || '/%' OR fb.scope = ? OR fb.scope LIKE ? || '/%')"
+            )
+            params.extend([scope, scope, scope, scope])
+        params.append(limit)
+        where = " AND ".join(conditions)
+        cursor = await self.db.execute(
+            f"""SELECT c.*,
+                       fa.content AS fact_a_content, fa.scope AS fact_a_scope,
+                       fb.content AS fact_b_content, fb.scope AS fact_b_scope
+                FROM conflicts c
+                JOIN facts fa ON c.fact_a_id = fa.id
+                JOIN facts fb ON c.fact_b_id = fb.id
+                WHERE {where}
+                ORDER BY c.resolved_at ASC
+                LIMIT ?""",
             params,
         )
         rows = await cursor.fetchall()

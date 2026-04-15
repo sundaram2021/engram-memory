@@ -1363,6 +1363,168 @@ def tail(scope: str | None, limit: int, interval: float, base_url: str) -> None:
         raise click.ClickException(str(exc))
 
 
+# ── engram diff ──────────────────────────────────────────────────────
+
+
+def _format_diff_fact(fact: dict[str, object], timestamp_key: str) -> str:
+    timestamp = fact.get(timestamp_key) or "-"
+    scope = fact.get("scope") or "-"
+    content = fact.get("content") or ""
+    fact_id = str(fact.get("id") or "")[:12]
+    return f"- [{timestamp}] [{scope}] {content} ({fact_id})"
+
+
+def _format_diff_conflict(conflict: dict[str, object]) -> str:
+    timestamp = conflict.get("resolved_at") or "-"
+    status = conflict.get("status") or "-"
+    conflict_id = str(conflict.get("id") or conflict.get("conflict_id") or "")[:12]
+    fact_a = conflict.get("fact_a_content") or conflict.get("fact_a_id") or ""
+    fact_b = conflict.get("fact_b_content") or conflict.get("fact_b_id") or ""
+    return f"- [{timestamp}] [{status}] {fact_a} <> {fact_b} ({conflict_id})"
+
+
+def _format_memory_diff(diff: dict[str, object]) -> str:
+    summary = diff.get("summary") or {}
+    if not isinstance(summary, dict):
+        summary = {}
+
+    lines = [
+        "Memory diff",
+        f"  From              : {diff.get('from')}",
+        f"  To                : {diff.get('to')}",
+    ]
+    if diff.get("scope"):
+        lines.append(f"  Scope             : {diff.get('scope')}")
+    lines.extend(
+        [
+            f"  Added facts       : {summary.get('added', 0)}",
+            f"  Superseded facts  : {summary.get('superseded', 0)}",
+            f"  Resolved conflicts: {summary.get('resolved_conflicts', 0)}",
+        ]
+    )
+
+    added = diff.get("added") or []
+    superseded = diff.get("superseded") or []
+    resolved = diff.get("resolved_conflicts") or []
+
+    if added:
+        lines.append("\nAdded facts:")
+        lines.extend(_format_diff_fact(fact, "committed_at") for fact in added)  # type: ignore[arg-type]
+    if superseded:
+        lines.append("\nSuperseded/retired facts:")
+        lines.extend(_format_diff_fact(fact, "valid_until") for fact in superseded)  # type: ignore[arg-type]
+    if resolved:
+        lines.append("\nResolved conflicts:")
+        lines.extend(_format_diff_conflict(conflict) for conflict in resolved)  # type: ignore[arg-type]
+
+    return "\n".join(lines)
+
+
+async def _diff_once(
+    from_time: str,
+    to_time: str,
+    scope: str | None,
+    limit: int,
+    as_json: bool,
+) -> str:
+    """Run one terminal memory diff against the current workspace."""
+    import os
+
+    from engram.engine import EngramEngine
+
+    logger = logging.getLogger("engram")
+    db_url = os.environ.get("ENGRAM_DB_URL", "")
+    workspace_id = "local"
+    schema = "engram"
+
+    try:
+        from engram.workspace import read_workspace
+
+        ws = read_workspace()
+        if ws and ws.db_url:
+            db_url = ws.db_url
+            workspace_id = ws.engram_id
+            schema = ws.schema
+    except Exception:
+        pass
+
+    if db_url:
+        from engram.postgres_storage import PostgresStorage
+
+        storage = PostgresStorage(db_url=db_url, workspace_id=workspace_id, schema=schema)
+        logger.info("Diff mode: PostgreSQL (workspace: %s, schema: %s)", workspace_id, schema)
+    else:
+        from engram.storage import SQLiteStorage
+
+        storage = SQLiteStorage(db_path=str(DEFAULT_DB_PATH), workspace_id=workspace_id)
+        logger.info("Diff mode: SQLite (%s, workspace: %s)", DEFAULT_DB_PATH, workspace_id)
+
+    await storage.connect()
+    engine = EngramEngine(storage)
+
+    try:
+        diff = await engine.diff_memory(from_time, to_time, scope=scope, limit=limit)
+    finally:
+        await storage.close()
+
+    if as_json:
+        return json.dumps(diff, indent=2)
+    return _format_memory_diff(diff)
+
+
+@main.command("diff")
+@click.option(
+    "--from",
+    "from_time",
+    required=True,
+    help="Start of the diff window as an ISO-8601 timestamp.",
+)
+@click.option(
+    "--to",
+    "to_time",
+    required=True,
+    help="End of the diff window as an ISO-8601 timestamp.",
+)
+@click.option("--scope", default=None, help="Optional scope prefix to filter changes.")
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    show_default=True,
+    help="Output format.",
+)
+@click.option(
+    "--limit",
+    default=1000,
+    type=click.IntRange(1, 1000),
+    show_default=True,
+    help="Maximum rows per diff bucket.",
+)
+def diff_cmd(
+    from_time: str,
+    to_time: str,
+    scope: str | None,
+    output_format: str,
+    limit: int,
+) -> None:
+    """Show memory changes over a time window."""
+    try:
+        output = asyncio.run(
+            _diff_once(
+                from_time=from_time,
+                to_time=to_time,
+                scope=scope,
+                limit=limit,
+                as_json=output_format == "json",
+            )
+        )
+    except Exception as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(output)
+
+
 # ── engram status ───────────────────────────────────────────────────────
 
 

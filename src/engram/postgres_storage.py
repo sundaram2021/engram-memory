@@ -921,6 +921,91 @@ class PostgresStorage(BaseStorage):
             )
         return [_row_to_dict(r) for r in rows]
 
+    async def get_facts_added_between(
+        self, start: str, end: str, scope: str | None = None, limit: int = 1000
+    ) -> list[dict]:
+        conditions = ["workspace_id = $1", "committed_at >= $2", "committed_at <= $3"]
+        params: list[Any] = [self.workspace_id, start, end]
+        idx = 4
+        if scope:
+            conditions.append(f"(scope = ${idx} OR scope LIKE ${idx} || '/%')")
+            params.append(scope)
+            idx += 1
+        params.append(limit)
+        where = " AND ".join(conditions)
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT id, lineage_id, content, scope, confidence, fact_type,
+                          agent_id, engineer, committed_at, valid_from, valid_until,
+                          supersedes_fact_id, durability
+                   FROM facts
+                   WHERE {where}
+                   ORDER BY committed_at ASC
+                   LIMIT ${idx}""",
+                *params,
+            )
+        return [_row_to_dict(r) for r in rows]
+
+    async def get_facts_retired_between(
+        self, start: str, end: str, scope: str | None = None, limit: int = 1000
+    ) -> list[dict]:
+        conditions = ["workspace_id = $1", "valid_until >= $2", "valid_until <= $3"]
+        params: list[Any] = [self.workspace_id, start, end]
+        idx = 4
+        if scope:
+            conditions.append(f"(scope = ${idx} OR scope LIKE ${idx} || '/%')")
+            params.append(scope)
+            idx += 1
+        params.append(limit)
+        where = " AND ".join(conditions)
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT id, lineage_id, content, scope, confidence, fact_type,
+                          agent_id, engineer, committed_at, valid_from, valid_until,
+                          supersedes_fact_id, durability
+                   FROM facts
+                   WHERE {where}
+                   ORDER BY valid_until ASC
+                   LIMIT ${idx}""",
+                *params,
+            )
+        return [_row_to_dict(r) for r in rows]
+
+    async def get_conflicts_resolved_between(
+        self, start: str, end: str, scope: str | None = None, limit: int = 1000
+    ) -> list[dict]:
+        conditions = [
+            "c.workspace_id = $1",
+            "c.resolved_at >= $2",
+            "c.resolved_at <= $3",
+            "c.status != 'open'",
+        ]
+        params: list[Any] = [self.workspace_id, start, end]
+        idx = 4
+        if scope:
+            conditions.append(
+                f"(fa.scope = ${idx} OR fa.scope LIKE ${idx} || '/%' "
+                f"OR fb.scope = ${idx} OR fb.scope LIKE ${idx} || '/%')"
+            )
+            params.append(scope)
+            idx += 1
+        params.append(limit)
+        where = " AND ".join(conditions)
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT c.*,
+                          fa.content AS fact_a_content, fa.scope AS fact_a_scope,
+                          fb.content AS fact_b_content, fb.scope AS fact_b_scope
+                   FROM conflicts c
+                   JOIN facts fa ON c.fact_a_id = fa.id
+                   JOIN facts fb ON c.fact_b_id = fb.id
+                   WHERE {where}
+                   ORDER BY c.resolved_at ASC
+                   LIMIT ${idx}""",
+                *params,
+            )
+        return [_row_to_dict(r) for r in rows]
+
     async def get_fact_timeline(self, scope: str | None = None, limit: int = 100) -> list[dict]:
         conditions = ["workspace_id = $1"]
         params: list[Any] = [self.workspace_id]

@@ -113,6 +113,17 @@ def _has_negation_mismatch(left: str, right: str) -> bool:
     )
 
 
+def _parse_window_timestamp(value: str, label: str) -> datetime:
+    """Parse a CLI/API timestamp and normalize naive values to UTC."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{label} must be an ISO-8601 timestamp.") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 class EngramEngine:
     """Core engine coordinating commit, query, detection, and resolution."""
 
@@ -1685,6 +1696,53 @@ class EngramEngine:
             scope_filter=scope,
             anonymous_mode=anonymous_mode,
         )
+
+    # ── engram_diff ───────────────────────────────────────────────────
+
+    async def diff_memory(
+        self,
+        from_time: str,
+        to_time: str,
+        scope: str | None = None,
+        limit: int = 1000,
+    ) -> dict[str, Any]:
+        """Return memory changes over a time window.
+
+        The diff is read-only and groups changes into added facts, retired or
+        superseded facts, and resolved/dismissed conflicts.
+        """
+        start = _parse_window_timestamp(from_time, "--from")
+        end = _parse_window_timestamp(to_time, "--to")
+        if start >= end:
+            raise ValueError("--from must be earlier than --to.")
+
+        limit = max(1, min(limit, 1000))
+        start_iso = start.isoformat()
+        end_iso = end.isoformat()
+
+        added = await self.storage.get_facts_added_between(
+            start_iso, end_iso, scope=scope, limit=limit
+        )
+        superseded = await self.storage.get_facts_retired_between(
+            start_iso, end_iso, scope=scope, limit=limit
+        )
+        resolved_conflicts = await self.storage.get_conflicts_resolved_between(
+            start_iso, end_iso, scope=scope, limit=limit
+        )
+
+        return {
+            "from": start_iso,
+            "to": end_iso,
+            "scope": scope,
+            "summary": {
+                "added": len(added),
+                "superseded": len(superseded),
+                "resolved_conflicts": len(resolved_conflicts),
+            },
+            "added": added,
+            "superseded": superseded,
+            "resolved_conflicts": resolved_conflicts,
+        }
 
     # ── lineage ───────────────────────────────────────────────────────
 
