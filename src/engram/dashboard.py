@@ -98,12 +98,16 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
         return HTMLResponse(_render_lineage_timeline(lineage))
 
     async def knowledge_base(request: Request) -> HTMLResponse:
-        scope = request.query_params.get("scope")
-        fact_type = request.query_params.get("fact_type")
-        as_of = request.query_params.get("as_of")
+        scope = request.query_params.get("scope") or ""
+        fact_type = request.query_params.get("fact_type") or ""
+        as_of = request.query_params.get("as_of") or ""
         search_query = request.query_params.get("q", "").strip()
         offset = int(request.query_params.get("offset", 0))
         limit = int(request.query_params.get("limit", 100))
+
+        scope_filter = scope or None
+        fact_type_filter = fact_type or None
+        as_of_filter = as_of or None
 
         # Use FTS search if query provided
         if search_query:
@@ -116,17 +120,17 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
             except Exception:
                 # FTS fallback - use regular query
                 facts = await storage.get_current_facts_in_scope(
-                    scope=scope, fact_type=fact_type, as_of=as_of, limit=limit, offset=offset
+                    scope=scope_filter, fact_type=fact_type_filter, as_of=as_of_filter, limit=limit, offset=offset
                 )
         else:
             facts = await storage.get_current_facts_in_scope(
-                scope=scope, fact_type=fact_type, as_of=as_of, limit=limit, offset=offset
+                scope=scope_filter, fact_type=fact_type_filter, as_of=as_of_filter, limit=limit, offset=offset
             )
 
         if not facts and offset > 0:
             offset = 0
             facts = await storage.get_current_facts_in_scope(
-                scope=scope, fact_type=fact_type, as_of=as_of, limit=limit, offset=0
+                scope=scope_filter, fact_type=fact_type_filter, as_of=as_of_filter, limit=limit, offset=0
             )
 
         scopes = await storage.get_distinct_scopes()
@@ -136,6 +140,9 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
                 facts,
                 conflict_ids,
                 search_query=search_query,
+                scope=scope,
+                fact_type=fact_type,
+                as_of=as_of,
                 offset=offset,
                 limit=limit,
                 scopes=scopes,
@@ -146,13 +153,15 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
         scope = request.query_params.get("scope") or None
         status = request.query_params.get("status", "open")
         if engine is None:
-            return HTMLResponse(_render_conflicts_page([], stats={"open": 0, "resolved": 0}))
+            return HTMLResponse(
+                _render_conflicts_page([], stats={"open": 0, "resolved": 0}, scope=scope, status=status)
+            )
         conflicts = await engine.get_conflicts(scope=scope, status=status)
         stats = {
             "open": await storage.count_conflicts("open"),
             "resolved": await storage.count_conflicts("resolved"),
         }
-        return HTMLResponse(_render_conflicts_page(conflicts, stats=stats))
+        return HTMLResponse(_render_conflicts_page(conflicts, stats=stats, scope=scope, status=status))
 
     async def approve_suggestion(request: Request) -> Response:
         """HTMX: approve the LLM-suggested resolution for a conflict."""
@@ -214,10 +223,10 @@ def build_dashboard_routes(storage: Storage, engine: Any = None) -> list[Route]:
         return HTMLResponse(_render_conflict_card(updated or conflict))
 
     async def timeline(request: Request) -> HTMLResponse:
-        scope = request.query_params.get("scope")
-        facts = await storage.get_fact_timeline(scope=scope, limit=100)
+        scope = request.query_params.get("scope") or ""
+        facts = await storage.get_fact_timeline(scope=scope or None, limit=100)
         scopes = await storage.get_distinct_scopes()
-        return HTMLResponse(_render_timeline(facts, scopes=scopes))
+        return HTMLResponse(_render_timeline(facts, scopes=scopes, scope=scope))
 
     async def agents_view(request: Request) -> HTMLResponse:
         search_query = request.query_params.get("q", "").strip()
@@ -525,6 +534,9 @@ _DASH_STYLE = """
               border-radius: 4px; border: 1px solid #c6e9c6; }
   .escalation-note { font-size: 0.7rem; color: #d97706; margin-left: auto; }
   .badge-auto { background: #e0f2fe; color: #0369a1; }
+  .badge-genuine { background: #fee2e2; color: #dc2626; }
+  .badge-evolution { background: #e0f2fe; color: #0369a1; }
+  .badge-ambiguous { background: #fef3c7; color: #d97706; }
 
   .conflict-facts { display: grid; grid-template-columns: 1fr auto 1fr;
                     gap: 0.75rem; align-items: start; margin-bottom: 0.75rem; }
@@ -825,10 +837,15 @@ def _render_facts_table(
     facts: list[dict],
     conflict_ids: set[str],
     search_query: str = "",
+    scope: str = "",
+    fact_type: str = "",
+    as_of: str = "",
     offset: int = 0,
     limit: int = 100,
     scopes: list[str] | None = None,
 ) -> str:
+    import re
+
     rows = []
     for f in facts:
         has_conflict = f["id"] in conflict_ids
@@ -840,17 +857,16 @@ def _render_facts_table(
             else '<span class="badge badge-unverified">unverified</span>'
         )
 
-        # Highlight search terms in content
-        content = f["content"]
+        # Highlight search terms in content — escape first, then inject safe <mark> tags
+        content_escaped = _esc(f["content"])
         if search_query:
-            # Simple highlight - replace search terms with highlighted version
-            import re
-
-            pattern = re.compile(re.escape(search_query), re.IGNORECASE)
-            content = pattern.sub(f"<mark>{search_query}</mark>", content)
+            pattern = re.compile(re.escape(_esc(search_query)), re.IGNORECASE)
+            content_escaped = pattern.sub(
+                lambda m: f"<mark>{m.group(0)}</mark>", content_escaped
+            )
 
         rows.append(
-            f"<tr><td class='content-cell'>{_esc(content)}</td>"
+            f"<tr><td class='content-cell'>{content_escaped}</td>"
             f"<td>{_esc(f['scope'])}</td><td>{f['confidence']:.2f}</td>"
             f"<td>{_esc(f['fact_type'])}</td><td>{_esc(f['agent_id'])}</td>"
             f"<td>{conflict_badge} {ver_badge}</td>"
@@ -859,32 +875,53 @@ def _render_facts_table(
 
     prev_offset = max(0, offset - limit)
     next_offset = offset + limit if len(facts) == limit else offset
+
+    def _page_qs(new_offset: int) -> str:
+        parts = []
+        if search_query:
+            parts.append(f"q={_esc(search_query)}")
+        if scope:
+            parts.append(f"scope={_esc(scope)}")
+        if fact_type:
+            parts.append(f"fact_type={_esc(fact_type)}")
+        if as_of:
+            parts.append(f"as_of={_esc(as_of)}")
+        parts.append(f"offset={new_offset}&limit={limit}")
+        return "?" + "&".join(parts)
+
     pagination = ""
     if offset > 0 or len(facts) == limit:
+        prev_disabled = ' style="pointer-events:none;opacity:0.5;"' if offset == 0 else ""
+        next_disabled = ' style="pointer-events:none;opacity:0.5;"' if len(facts) < limit else ""
         pagination = f"""
         <div class="pagination" style="display:flex;gap:0.5rem;margin-top:1rem;">
-          <a href="?q={_esc(search_query)}&offset={prev_offset}&limit={limit}" class="btn-dismiss" {"style:pointer-events:none;opacity:0.5;" if offset == 0 else ""}>&larr; Previous</a>
+          <a href="{_page_qs(prev_offset)}" class="btn-dismiss"{prev_disabled}>&larr; Previous</a>
           <span style="padding:0.4rem 0.8rem;color:#5a8a5a;">Page {offset // limit + 1}</span>
-          <a href="?q={_esc(search_query)}&offset={next_offset}&limit={limit}" class="btn-dismiss" {"style:pointer-events:none;opacity:0.5;" if len(facts) < limit else ""}>Next &rarr;</a>
+          <a href="{_page_qs(next_offset)}" class="btn-dismiss"{next_disabled}>Next &rarr;</a>
         </div>"""
 
     scope_options = ""
     if scopes:
         scope_options = "".join(f'<option value="{_esc(s)}">{_esc(s)}</option>' for s in scopes)
+
+    def _ft_option(val: str, label: str) -> str:
+        sel = " selected" if fact_type == val else ""
+        return f'<option value="{val}"{sel}>{label}</option>'
+
     body = f"""
     <h2>Knowledge Base</h2>
     <div class="filter-bar">
       <form method="get" action="/dashboard/facts" style="display:flex;gap:0.5rem;flex-wrap:wrap;">
         <input type="text" name="q" placeholder="Search facts..." value="{_esc(search_query)}" style="min-width:200px;">
-        <input name="scope" placeholder="Scope filter" value="" list="scopes-list">
+        <input name="scope" placeholder="Scope filter" value="{_esc(scope)}" list="scopes-list">
         <datalist id="scopes-list">{scope_options}</datalist>
         <select name="fact_type">
-          <option value="">All types</option>
-          <option value="observation">observation</option>
-          <option value="inference">inference</option>
-          <option value="decision">decision</option>
+          {_ft_option("", "All types")}
+          {_ft_option("observation", "observation")}
+          {_ft_option("inference", "inference")}
+          {_ft_option("decision", "decision")}
         </select>
-        <input name="as_of" placeholder="as_of (ISO 8601)" value="">
+        <input name="as_of" placeholder="as_of (ISO 8601)" value="{_esc(as_of)}">
         <input type="hidden" name="offset" value="{offset}">
         <input type="hidden" name="limit" value="{limit}">
         <button type="submit">Search</button>
@@ -907,7 +944,12 @@ def _render_facts_table(
     )
 
 
-def _render_conflicts_page(conflicts: list[dict], stats: dict | None = None) -> str:
+def _render_conflicts_page(
+    conflicts: list[dict],
+    stats: dict | None = None,
+    scope: str | None = None,
+    status: str = "open",
+) -> str:
     """Render the Conflicts tab."""
     open_count = (
         stats.get("open", 0) if stats else sum(1 for c in conflicts if c.get("status") == "open")
@@ -934,14 +976,18 @@ def _render_conflicts_page(conflicts: list[dict], stats: dict | None = None) -> 
             + "</div>"
         )
 
-    filter_form = """
+    def _status_option(val: str, label: str) -> str:
+        sel = " selected" if status == val else ""
+        return f'<option value="{val}"{sel}>{label}</option>'
+
+    filter_form = f"""
     <form method="get" action="/dashboard/conflicts" class="filter-bar">
-      <input name="scope" placeholder="Filter by scope…" value="">
+      <input name="scope" placeholder="Filter by scope…" value="{_esc(scope or '')}">
       <select name="status">
-        <option value="open">Open</option>
-        <option value="resolved">Resolved</option>
-        <option value="dismissed">Dismissed</option>
-        <option value="all">All</option>
+        {_status_option("open", "Open")}
+        {_status_option("resolved", "Resolved")}
+        {_status_option("dismissed", "Dismissed")}
+        {_status_option("all", "All")}
       </select>
       <button type="submit">Filter</button>
     </form>"""
@@ -970,6 +1016,7 @@ def _render_conflict_card(c: dict) -> str:
         explanation = c.get("explanation", "")
         status = c.get("status", "open")
         severity = c.get("severity", "high")
+        conflict_type = c.get("conflict_type", "genuine")
         detected = (c.get("detected_at") or "")[:16]
         resolution = c.get("resolution") or ""
         resolution_type = c.get("resolution_type") or ""
@@ -996,6 +1043,7 @@ def _render_conflict_card(c: dict) -> str:
         explanation = c.get("explanation", "")
         status = c.get("status", "open")
         severity = c.get("severity", "high")
+        conflict_type = c.get("conflict_type", "genuine")
         detected = (c.get("detected_at") or "")[:16]
         resolution = c.get("resolution") or ""
         resolution_type = c.get("resolution_type") or ""
@@ -1014,6 +1062,11 @@ def _render_conflict_card(c: dict) -> str:
         "resolved": "badge-resolved",
         "dismissed": "badge-dismissed",
     }.get(status, "badge-dismissed")
+    type_badge_cls = {
+        "genuine": "badge-genuine",
+        "evolution": "badge-evolution",
+        "ambiguous": "badge-ambiguous",
+    }.get(conflict_type, "badge-genuine")
 
     def _fact_box(f: dict, label: str) -> str:
         content = _esc(str(f.get("content") or ""))
@@ -1081,6 +1134,7 @@ def _render_conflict_card(c: dict) -> str:
         f'<div id="conflict-{_esc(cid)}" class="conflict-card">'
         f'<div class="conflict-header">'
         f'<span class="badge {sev_badge_cls}">{_esc(severity)}</span>'
+        f'<span class="badge {type_badge_cls}">{_esc(conflict_type)}</span>'
         f'<span class="conflict-id">{_esc(cid[:12])}</span>'
         f'<span style="color:#9ab89a;font-size:0.72rem;">{_esc(detected)}</span>'
         f'<span class="badge {status_badge_cls}" style="margin-left:auto;">{_esc(status)}</span>'
@@ -1096,7 +1150,7 @@ def _render_conflict_card(c: dict) -> str:
     )
 
 
-def _render_timeline(facts: list[dict], scopes: list[str] | None = None) -> str:
+def _render_timeline(facts: list[dict], scopes: list[str] | None = None, scope: str = "") -> str:
     rows = []
     for f in facts:
         is_superseded = f.get("valid_until") is not None
@@ -1119,7 +1173,7 @@ def _render_timeline(facts: list[dict], scopes: list[str] | None = None) -> str:
     <h2>Timeline</h2>
     <div class="filter-bar">
       <form method="get" action="/dashboard/timeline" style="display:flex;gap:0.5rem;">
-        <input name="scope" placeholder="Scope filter" value="" list="scopes-list">
+        <input name="scope" placeholder="Scope filter" value="{_esc(scope)}" list="scopes-list">
         <datalist id="scopes-list">{scope_options}</datalist>
         <button type="submit">Filter</button>
       </form>
