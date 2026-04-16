@@ -125,7 +125,7 @@ class ConflictBenchmark:
         recall = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
 
-        print(f"\n=== BENCHMARK SUMMARY ===")
+        print("\n=== BENCHMARK SUMMARY ===")
         print(f"Precision: {precision:.2%}")
         print(f"Recall:    {recall:.2%}")
         print(f"F1 Score:  {f1:.2%}")
