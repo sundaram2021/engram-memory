@@ -1485,6 +1485,7 @@ def _render_fact_detail(fact: dict, lineage: list[dict]) -> str:
     lineage_id = fact.get("lineage_id", "")
     query_hits = fact.get("query_hits", 0)
     durability = fact.get("durability", "durable")
+    entities = fact.get("entities") or []
 
     verified = (
         '<span class="badge badge-verified">verified</span>'
@@ -1494,6 +1495,38 @@ def _render_fact_detail(fact: dict, lineage: list[dict]) -> str:
     durability_badge = (
         f'<span class="badge badge-low">{durability}</span>' if durability == "ephemeral" else ""
     )
+
+    ticket_refs = []
+    if isinstance(entities, str):
+        try:
+            import json
+
+            entities = json.loads(entities)
+        except Exception:
+            entities = []
+    if isinstance(entities, list):
+        ticket_refs = [e for e in entities if isinstance(e, dict) and e.get("type") == "ticket_ref"]
+
+    ticket_html = ""
+    if ticket_refs:
+        chips = []
+        for ticket in ticket_refs:
+            ref = _esc(ticket.get("name", ""))
+            chips.append(
+                f'<span style="display:inline-block;padding:0.25rem 0.6rem;'
+                f"background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;"
+                f'border-radius:999px;font-size:0.8rem;font-weight:500;">'
+                f"{ref}"
+                f"</span>"
+            )
+        ticket_html = f"""
+            <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid #e5e7eb;">
+                <h4 style="font-size:0.9rem;color:#6b7280;margin-bottom:0.5rem;">Linked Tickets</h4>
+                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                    {"".join(chips)}
+                </div>
+            </div>
+        """
 
     lineage_html = ""
     if lineage_id:
@@ -1535,6 +1568,8 @@ def _render_fact_detail(fact: dict, lineage: list[dict]) -> str:
                     </div>
                 </div>
             </div>
+
+            {ticket_html}
             
             {lineage_html}
         </div>

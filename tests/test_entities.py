@@ -93,3 +93,19 @@ def test_extracts_user_limit():
     limit_entities = [e for e in entities if e.get("name") == "user_limit"]
     assert len(limit_entities) == 1
     assert limit_entities[0]["value"] == 10
+
+
+def test_extracts_ticket_references():
+    entities = extract_entities(
+        "See GH-123, LINEAR-456, and JIRA-789 before changing the auth gateway."
+    )
+    ticket_entities = [e for e in entities if e["type"] == "ticket_ref"]
+    assert {e["name"] for e in ticket_entities} == {"GH-123", "LINEAR-456", "JIRA-789"}
+    assert {e["system"] for e in ticket_entities} == {"gh", "linear", "jira"}
+
+
+def test_deduplicates_ticket_references():
+    entities = extract_entities("GH-123 was discussed in GH-123 during rollout.")
+    ticket_entities = [e for e in entities if e["type"] == "ticket_ref"]
+    assert len(ticket_entities) == 1
+    assert ticket_entities[0]["name"] == "GH-123"

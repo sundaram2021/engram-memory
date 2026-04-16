@@ -63,6 +63,12 @@ _SERVICE_PATTERN = re.compile(
 # Version strings
 _VERSION_PATTERN = re.compile(r"\bv?(?P<value>\d+\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9.]+)?)\b")
 
+# Ticket references: GH-123, LINEAR-456, JIRA-789
+_TICKET_REF_PATTERN = re.compile(
+    r"\b(?P<system>GH|LINEAR|JIRA)-(?P<id>\d+)\b",
+    re.IGNORECASE,
+)
+
 # Technology names (common ones)
 _TECH_NAMES = {
     "postgresql",
@@ -162,6 +168,23 @@ def extract_entities(content: str) -> list[dict[str, Any]]:
         if key not in seen:
             seen.add(key)
             entities.append({"name": name, "type": "version", "value": value})
+
+    # Ticket references
+    for m in _TICKET_REF_PATTERN.finditer(content):
+        system = m.group("system").upper()
+        ticket_id = m.group("id")
+        ref = f"{system}-{ticket_id}"
+        key = f"ticket_ref:{ref}"
+        if key not in seen:
+            seen.add(key)
+            entities.append(
+                {
+                    "name": ref,
+                    "type": "ticket_ref",
+                    "value": ticket_id,
+                    "system": system.lower(),
+                }
+            )
 
     # Limit/cap values: "maximum of 3 projects", "up to 5 users", etc.
     for pattern in (_LIMIT_VALUE_PATTERN, _TRAILING_LIMIT_PATTERN):
