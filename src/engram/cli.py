@@ -19,6 +19,10 @@ import os
 import platform
 
 import click
+import questionary
+from rich.console import Console as _Console
+from rich.panel import Panel as _Panel
+from rich.text import Text as _Text
 
 from engram import embeddings
 from engram.storage import DEFAULT_DB_PATH
@@ -44,7 +48,7 @@ def main(ctx: click.Context) -> None:
         return
 
     import os
-    from engram.workspace import read_workspace, WORKSPACE_PATH
+    from engram.workspace import read_workspace
 
     ws = read_workspace()
     configured = ws is not None or bool(os.environ.get("ENGRAM_DB_URL"))
@@ -2786,13 +2790,6 @@ def export_cmd(format: str, output: str | None, scope: str | None) -> None:
 
 # ── engram conflicts ────────────────────────────────────────────────────────
 
-import sys as _sys
-
-import questionary
-from rich.console import Console as _Console
-from rich.panel import Panel as _Panel
-from rich.text import Text as _Text
-
 _TUI_STYLE = questionary.Style(
     [
         ("qmark", "fg:#5c7cfa bold"),
@@ -2882,12 +2879,12 @@ def _render_conflict_panel(c: dict, console: _Console) -> None:
     sev_style = _SEVERITY_RICH.get(severity, "white")
     body = _Text()
 
-    body.append(f"Conflict  ", style="dim")
+    body.append("Conflict  ", style="dim")
     body.append(f"{c.get('conflict_id') or ''}\n", style="white")
-    body.append(f"Severity  ", style="dim")
+    body.append("Severity  ", style="dim")
     body.append(f"{severity.upper()}", style=sev_style)
     body.append(f"   Tier: {tier}\n", style="dim")
-    body.append(f"Detected  ", style="dim")
+    body.append("Detected  ", style="dim")
     body.append(f"{c.get('detected_at') or '-'}\n", style="dim")
 
     body.append("\n")
@@ -3105,11 +3102,10 @@ def conflicts(ctx: click.Context, status: str, scope: str | None, as_json: bool)
         return
 
     # ── workspace check ───────────────────────────────────────────────
-    import os
     from engram.workspace import is_configured
 
     if not is_configured():
-        if as_json or not _sys.stdout.isatty():
+        if as_json or not sys.stdout.isatty():
             raise click.ClickException(
                 "Not connected to a workspace. Run: engram setup  or  engram join <invite-key>"
             )
@@ -3125,7 +3121,7 @@ def conflicts(ctx: click.Context, status: str, scope: str | None, as_json: bool)
         return
 
     # ── scripting / pipe mode ─────────────────────────────────────────
-    if as_json or not _sys.stdout.isatty():
+    if as_json or not sys.stdout.isatty():
         async def _run() -> list[dict]:
             engine, storage = await _conflicts_engine_ctx()
             try:

@@ -13,7 +13,6 @@ import asyncio
 import json
 
 import numpy as np
-import pytest
 from click.testing import CliRunner
 
 from engram.cli import main
