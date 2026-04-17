@@ -6,9 +6,9 @@
 set -e
 
 MCP_URL="${ENGRAM_MCP_URL:-https://www.engram-memory.com/mcp}"
-INVITE_KEY=""
+INVITE_KEY="${ENGRAM_JOIN:-}"
 
-# Parse --join flag
+# Parse --join flag (overrides ENGRAM_JOIN env var if both are set)
 while [ $# -gt 0 ]; do
   case "$1" in
     --join) INVITE_KEY="$2"; shift 2 ;;
