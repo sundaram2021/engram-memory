@@ -51,6 +51,7 @@ _MENU_ITEMS: list[tuple[str, str, str]] = [
     ("conflicts", "conflicts", "review open memory conflicts"),
     ("search", "search <q>", "query workspace memory"),
     ("tail", "tail", "stream live workspace facts"),
+    ("merge", "merge", "merge another workspace into this one"),
     ("status", "status", "workspace info"),
     ("whoami", "whoami", "show identity"),
     ("export", "export", "export workspace data"),
@@ -65,9 +66,10 @@ _HELP_LINES: list[tuple[str, str]] = [
     ("class:output", "  Available commands:\n"),
     ("class:output", "    conflicts   — review open memory conflicts\n"),
     ("class:output", "    search <q>  — query workspace memory\n"),
+    ("class:output", "    tail        — stream live facts\n"),
+    ("class:output", "    merge       — merge another workspace into this one\n"),
     ("class:output", "    status      — workspace info\n"),
     ("class:output", "    whoami      — show identity\n"),
-    ("class:output", "    tail        — stream live facts\n"),
     ("class:output", "    export      — export workspace data\n"),
     ("class:output", "    clear       — clear output  (Ctrl+L)\n"),
     ("class:output", "    quit / q    — exit          (Ctrl+C)\n"),
@@ -218,6 +220,12 @@ def run_tui(ws: Any, ctx: Any) -> None:
 
         if cmd == "search" and not arg:
             output_lines.append(("class:output.error", "  Usage: search <query>\n"))
+            return
+
+        if cmd == "merge" and not arg:
+            output_lines.append(
+                ("class:output.error", "  Usage: merge --source-key <key> [--dry-run]\n")
+            )
             return
 
         _run_engram_command(cmd, arg, output_lines)

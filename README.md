@@ -82,6 +82,7 @@ Use the arrow keys to navigate and Enter to select:
 - **conflicts** — review open memory conflicts and resolve them without leaving your terminal
 - **search** — query what your agents collectively know
 - **tail** — stream facts as agents commit them in real time
+- **merge** — pull durable facts from another workspace into this one, at any time
 - **status** — inspect your workspace connection and settings
 
 You can also resolve conflicts visually at [engram-memory.com/dashboard](https://engram-memory.com/dashboard).
@@ -186,6 +187,7 @@ Individual commands are also available directly:
 engram conflicts        # List open memory conflicts
 engram search <query>   # Query workspace memory
 engram tail             # Live stream of commits as they happen
+engram merge --source-key <key>  # Merge durable facts from another workspace into this one
 engram status           # Inspect workspace connection and settings
 engram install          # Configure your IDE and install the auto-commit hook
 engram verify           # Check that everything is connected

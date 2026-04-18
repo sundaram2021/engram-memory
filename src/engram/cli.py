@@ -2995,6 +2995,134 @@ def export_cmd(format: str, output: str | None, scope: str | None) -> None:
         click.echo(f"Error: {e}", err=True)
 
 
+# ── engram merge ─────────────────────────────────────────────────────────────
+
+
+@main.command("merge")
+@click.option("--source-key", required=True, help="Invite key for the source workspace.")
+@click.option(
+    "--target-key",
+    default=None,
+    help="Invite key for the target workspace (defaults to current workspace).",
+)
+@click.option(
+    "--source-url",
+    default=None,
+    help="Server URL for the source workspace (defaults to current server).",
+)
+@click.option("--dry-run", is_flag=True, help="Preview what would be merged without making changes.")
+@click.option("--scope", default=None, help="Only merge facts matching this scope prefix.")
+def merge_workspaces(
+    source_key: str,
+    target_key: str | None,
+    source_url: str | None,
+    dry_run: bool,
+    scope: str | None,
+) -> None:
+    """Merge durable facts from one workspace into another.
+
+    Pulls all durable facts from the source workspace and commits them
+    into the target workspace, skipping duplicates. Ephemeral facts are
+    not merged.
+    """
+    import urllib.request
+
+    ws = None
+    try:
+        from engram.workspace import read_workspace
+
+        ws = read_workspace()
+    except Exception:
+        pass
+
+    try:
+        from engram.commit_check import load_credentials
+
+        current_server_url, current_invite_key = load_credentials()
+    except Exception:
+        current_server_url = "https://www.engram-memory.com"
+        current_invite_key = ""
+
+    if ws and ws.server_url and not ws.db_url:
+        current_server_url = ws.server_url.rstrip("/")
+
+    src_url = (source_url or current_server_url).rstrip("/")
+    tgt_key = target_key or current_invite_key
+
+    if not tgt_key:
+        click.echo("Error: No target invite key. Pass --target-key or configure your workspace.", err=True)
+        return
+
+    # ── fetch durable facts from source ──────────────────────────────────────
+    facts_url = f"{src_url}/api/facts?limit=10000&durability=durable"
+    if scope:
+        facts_url += f"&scope={scope}"
+
+    try:
+        req = urllib.request.Request(
+            facts_url,
+            headers={"Accept": "application/json", "Authorization": f"Bearer {source_key}"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+        facts = data.get("facts", [])
+    except Exception as e:
+        click.echo(f"Error fetching source facts: {e}", err=True)
+        return
+
+    if not facts:
+        click.echo("No durable facts found in source workspace.")
+        return
+
+    click.echo(f"Found {len(facts)} durable fact(s) in source workspace.")
+
+    if dry_run:
+        click.echo("[dry-run] No changes made.")
+        for f in facts[:10]:
+            click.echo(f"  · [{f.get('scope', '?')}] {f.get('content', '')[:80]}")
+        if len(facts) > 10:
+            click.echo(f"  … and {len(facts) - 10} more.")
+        return
+
+    # ── commit each fact into target ──────────────────────────────────────────
+    tgt_commit_url = f"{src_url}/api/commit"
+    merged = 0
+    skipped = 0
+
+    for fact in facts:
+        payload = json.dumps(
+            {
+                "content": fact.get("content", ""),
+                "scope": fact.get("scope", "general"),
+                "confidence": fact.get("confidence", 0.8),
+                "agent_id": fact.get("agent_id", "merge"),
+                "fact_type": fact.get("fact_type", "observation"),
+                "operation": "add",
+            }
+        ).encode()
+
+        try:
+            req = urllib.request.Request(
+                tgt_commit_url,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {tgt_key}",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                result = json.loads(resp.read())
+            if result.get("deduplicated"):
+                skipped += 1
+            else:
+                merged += 1
+        except Exception:
+            skipped += 1
+
+    click.echo(f"Merge complete: {merged} fact(s) imported, {skipped} skipped (duplicates or errors).")
+
+
 # ── engram conflicts ────────────────────────────────────────────────────────
 
 _TUI_STYLE = questionary.Style(
