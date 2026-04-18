@@ -1953,8 +1953,14 @@ def webhook_delete(webhook_id: str) -> None:
 
 # ── engram conflicts ───────────────────────────────────────────────────────────
 
+
 @main.command("conflicts")
-@click.option("--status", default="open", type=click.Choice(["open", "resolved", "all"]), help="Filter by status.")
+@click.option(
+    "--status",
+    default="open",
+    type=click.Choice(["open", "resolved", "all"]),
+    help="Filter by status.",
+)
 @click.option("--limit", default=20, help="Max conflicts to show.")
 def conflicts_list(status: str, limit: int) -> None:
     """List workspace conflicts for terminal-based conflict resolution.
@@ -1980,6 +1986,7 @@ def conflicts_list(status: str, limit: int) -> None:
     db_url = os.getenv("ENGRAM_DB_URL")
     if db_url:
         from engram.postgres_storage import PostgresStorage
+
         storage = PostgresStorage(db_url=db_url, workspace_id=ws.engram_id, schema=ws.schema)
     else:
         storage = SQLiteStorage(db_path=str(DEFAULT_DB_PATH), workspace_id=ws.engram_id)
@@ -2010,8 +2017,15 @@ def conflicts_list(status: str, limit: int) -> None:
 
 @main.command("conflicts:resolve")
 @click.argument("conflict_id")
-@click.option("--resolution", type=click.Choice(["winner", "merge", "dismiss"]), required=True, help="Resolution type.")
-@click.option("--winning-fact", default=None, help="Fact ID to keep (required for winner resolution).")
+@click.option(
+    "--resolution",
+    type=click.Choice(["winner", "merge", "dismiss"]),
+    required=True,
+    help="Resolution type.",
+)
+@click.option(
+    "--winning-fact", default=None, help="Fact ID to keep (required for winner resolution)."
+)
 def conflicts_resolve(conflict_id: str, resolution: str, winning_fact: str | None) -> None:
     """Resolve a conflict from the terminal.
 
@@ -2044,6 +2058,7 @@ def conflicts_resolve(conflict_id: str, resolution: str, winning_fact: str | Non
     db_url = os.getenv("ENGRAM_DB_URL")
     if db_url:
         from engram.postgres_storage import PostgresStorage
+
         storage = PostgresStorage(db_url=db_url, workspace_id=ws.engram_id, schema=ws.schema)
     else:
         storage = SQLiteStorage(db_path=str(DEFAULT_DB_PATH), workspace_id=ws.engram_id)
@@ -2057,7 +2072,7 @@ def conflicts_resolve(conflict_id: str, resolution: str, winning_fact: str | Non
                 conflict_id=conflict_id,
                 resolution_type=resolution,
                 resolution=resolution,
-                winning_claim_id=winning_fact
+                winning_claim_id=winning_fact,
             )
             click.echo(f"✓ Conflict {conflict_id[:12]}... resolved as {resolution}")
         except ValueError as e:
