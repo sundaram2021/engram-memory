@@ -502,16 +502,29 @@ class PostgresStorage(BaseStorage):
                 f"INSERT INTO conflicts ({col_names}) VALUES ({placeholders})", *values
             )
 
-    async def conflict_exists(self, fact_a_id: str, fact_b_id: str) -> bool:
+    async def conflict_exists(self, fact_a_id: str, fact_b_id: str, status: str = "open") -> bool:
+        """Check if a conflict already exists between two facts (in either order) within this workspace.
+        
+        Args:
+            fact_a_id: First fact ID
+            fact_b_id: Second fact ID
+            status: Only check conflicts with this status (default: "open"). Pass None to check all.
+        """
+        conditions = [
+            "((fact_a_id = $1 AND fact_b_id = $2) OR (fact_a_id = $2 AND fact_b_id = $1))",
+            "workspace_id = $3"
+        ]
+        params = [fact_a_id, fact_b_id, self.workspace_id]
+        param_idx = 4
+        
+        if status is not None:
+            conditions.append(f"status = ${param_idx}")
+            params.append(status)
+        
+        query = f"SELECT 1 FROM conflicts WHERE {' AND '.join(conditions)}"
+        
         async with self.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT 1 FROM conflicts WHERE "
-                "((fact_a_id = $1 AND fact_b_id = $2) OR (fact_a_id = $2 AND fact_b_id = $1)) "
-                "AND workspace_id = $3",
-                fact_a_id,
-                fact_b_id,
-                self.workspace_id,
-            )
+            row = await conn.fetchrow(query, *params)
         return row is not None
 
     async def get_conflicts(self, scope: str | None = None, status: str = "open") -> list[dict]:
