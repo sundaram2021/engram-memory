@@ -2,9 +2,9 @@
 
 # Engram
 
-**Shared memory for your team's AI agents**
+**Shared memory for your AI agents**
 
-Every agent on the team sees the same verified facts. When agents contradict each other, Engram catches it before it becomes a bug.
+Every agent sees the same verified facts. When agents contradict each other, Engram catches it before it becomes a bug.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](./LICENSE)
 [![MCP](https://img.shields.io/badge/MCP-compatible-8b5cf6?style=flat-square)](https://modelcontextprotocol.io)
@@ -16,9 +16,9 @@ Every agent on the team sees the same verified facts. When agents contradict eac
 
 ## How It Works
 
-When your team works in the same codebase, your AI agents work in parallel — and drift apart. One agent learns something, another learns something different, and now they disagree. Engram detects that and surfaces it before it becomes a bug.
+Your AI agents work in parallel — and drift apart. One agent learns something, another learns something different, and now they disagree. Engram detects that and surfaces it before it becomes a bug.
 
-Every agent's messages are automatically committed to shared memory as facts. No manual step. No copy-pasting context between sessions. The team's collective knowledge accumulates and every agent benefits from it instantly.
+Every agent's messages are automatically committed to shared memory as facts. No manual step. No copy-pasting context between sessions. Knowledge accumulates and every agent benefits from it instantly. And the best part — you can add team members who are also working on your project.
 
 ## Why It Matters
 
@@ -40,7 +40,7 @@ When agents make consequential decisions, someone has to be accountable. Engram 
 
 **Step 1 — Create a workspace**
 
-Go to [engram-memory.com/dashboard](https://engram-memory.com/dashboard), sign in, and create a new workspace. You'll get an invite link to share with your team.
+Go to [engram-memory.com/dashboard](https://engram-memory.com/dashboard), sign in, and create a new workspace. You'll get an invite link to share with others working on your project.
 
 **Step 2 — Run the installer**
 
@@ -67,7 +67,7 @@ This configures your IDE and installs the auto-commit hook. Restart your editor 
 "Set up Engram for my team"
 ```
 
-Your agent connects to shared memory and writes a `.engram.env` file to your repo. Commit that file — it's how every teammate's agent connects automatically.
+Your agent connects to shared memory and writes a `.engram.env` file to your repo. Commit that file — it's how every agent connects automatically.
 
 **Step 4 — Manage memory from your terminal**
 
@@ -88,7 +88,7 @@ You can also resolve conflicts visually at [engram-memory.com/dashboard](https:/
 
 ---
 
-### If you're joining a teammate's workspace
+### If you're joining an existing workspace
 
 **Step 1 — Install Engram**
 
@@ -96,7 +96,7 @@ Run the same installer as above for your OS. This configures your IDE and instal
 
 **Step 2 — Accept the invite**
 
-Click the invite link your teammate shared, sign in at [engram-memory.com](https://engram-memory.com), and accept the workspace invite. This writes your invite key to `.engram.env` in the repo.
+Click the invite link, sign in at [engram-memory.com](https://engram-memory.com), and accept the workspace invite. This writes your invite key to `.engram.env` in the repo.
 
 When you open the codebase, your agent reads that file and connects automatically.
 
@@ -106,9 +106,9 @@ When you open the codebase, your agent reads that file and connects automaticall
 
 ## What Gets Committed
 
-Every message you send to your AI agent is recorded in shared team memory as a fact. The agent's responses are not stored — only your inputs. This gives every agent on the team a running record of what was asked, decided, and discovered.
+Every message you send to your AI agent is recorded in shared memory as a fact. The agent's responses are not stored — only your inputs. This gives every agent a running record of what was asked, decided, and discovered.
 
-Facts accumulate. The next time any agent on the team opens this codebase — yours, your teammate's, anyone with workspace access — they start with the full context of everything that's been verified.
+Facts accumulate. The next time any agent opens this codebase — yours or anyone else with workspace access — they start with the full context of everything that's been verified.
 
 ---
 
@@ -140,7 +140,7 @@ No browser required. No context switching. The conflict is resolved in your work
 
 **Option 2 — Web dashboard**
 
-Visit [engram-memory.com/dashboard](https://engram-memory.com/dashboard) to review and resolve conflicts in a visual interface — useful when you want to share a conflict with a teammate, inspect the full fact lineage, or manage multiple workspaces at once.
+Visit [engram-memory.com/dashboard](https://engram-memory.com/dashboard) to review and resolve conflicts in a visual interface — useful when you want to inspect the full fact lineage or manage multiple workspaces at once.
 
 ---
 
