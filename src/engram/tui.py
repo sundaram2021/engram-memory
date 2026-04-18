@@ -17,6 +17,7 @@ from prompt_toolkit.layout.containers import HSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.layout.processors import BeforeInput
+from prompt_toolkit.layout.screen import Point
 from prompt_toolkit.styles import Style
 
 _VERSION = "0.1.1"
@@ -38,9 +39,22 @@ _STYLE = Style.from_dict(
         "toolbar": "bg:#111111 #444444",
         "toolbar.key": "bg:#111111 #00dd55",
         "toolbar.sep": "bg:#111111 #333333",
-        "cursor-line": "bg:#1a1a1a",
     }
 )
+
+# Commands that the TUI passes through to the engram binary
+_VALID_COMMANDS = {
+    "conflicts",
+    "search",
+    "status",
+    "whoami",
+    "info",
+    "tail",
+    "export",
+    "stats",
+    "verify",
+    "doctor",
+}
 
 _HELP_LINES: list[tuple[str, str]] = [
     ("class:output.dim", "\n"),
@@ -49,9 +63,10 @@ _HELP_LINES: list[tuple[str, str]] = [
     ("class:output", "    search <q>  — query workspace memory\n"),
     ("class:output", "    status      — workspace info\n"),
     ("class:output", "    whoami      — show identity\n"),
+    ("class:output", "    tail        — stream live facts\n"),
     ("class:output", "    export      — export workspace data\n"),
-    ("class:output", "    clear       — clear this output\n"),
-    ("class:output", "    quit / q    — exit\n"),
+    ("class:output", "    clear       — clear this output  (Ctrl+L)\n"),
+    ("class:output", "    quit / q    — exit               (Ctrl+C)\n"),
     ("class:output.dim", "\n"),
 ]
 
@@ -66,7 +81,11 @@ def run_tui(ws: Any, ctx: Any) -> None:
         mode_label = "local · SQLite"
 
     workspace_id = ws.engram_id or "-"
-    cwd = os.path.expanduser("~/" + os.path.relpath(os.getcwd(), os.path.expanduser("~")))
+    try:
+        rel = os.path.relpath(os.getcwd(), os.path.expanduser("~"))
+        cwd = "~/" + rel if not rel.startswith("..") else os.getcwd()
+    except ValueError:
+        cwd = os.getcwd()
 
     output_lines: list[tuple[str, str]] = [
         ("class:output.dim", "\n"),
@@ -74,7 +93,7 @@ def run_tui(ws: Any, ctx: Any) -> None:
         ("class:output.dim", "\n"),
     ]
 
-    # ── formatted text producers ────────────────────────────────────────
+    # ── formatted text producers ─────────────────────────────────────────
 
     def header_text() -> AnyFormattedText:
         return [
@@ -90,10 +109,15 @@ def run_tui(ws: Any, ctx: Any) -> None:
         ]
 
     def separator_text() -> AnyFormattedText:
-        return [("class:separator", "─" * 120)]
+        return [("class:separator", "─" * 200)]
 
     def output_text() -> AnyFormattedText:
         return list(output_lines)
+
+    def output_cursor_pos() -> Point:
+        """Always position cursor at end of output so the window auto-scrolls."""
+        total_lines = sum(t.count("\n") for _, t in output_lines)
+        return Point(x=0, y=max(0, total_lines - 1))
 
     def toolbar_text() -> AnyFormattedText:
         return [
@@ -110,7 +134,7 @@ def run_tui(ws: Any, ctx: Any) -> None:
             ("class:toolbar", "  "),
         ]
 
-    # ── input handling ───────────────────────────────────────────────────
+    # ── input handling ────────────────────────────────────────────────────
 
     input_buf = Buffer(name="main_input", multiline=False)
 
@@ -137,6 +161,12 @@ def run_tui(ws: Any, ctx: Any) -> None:
             output_lines.clear()
             return
 
+        if cmd not in _VALID_COMMANDS:
+            output_lines.append(
+                ("class:output.error", f"  Unknown command: {cmd}. Type ? for help.\n")
+            )
+            return
+
         _run_engram_command(cmd, arg, output_lines)
 
     kb = KeyBindings()
@@ -157,28 +187,34 @@ def run_tui(ws: Any, ctx: Any) -> None:
         output_lines.clear()
         event.app.invalidate()
 
-    # ── layout ──────────────────────────────────────────────────────────
+    # ── layout ───────────────────────────────────────────────────────────
+
+    output_control = FormattedTextControl(
+        output_text,
+        get_cursor_position=output_cursor_pos,
+        focusable=False,
+    )
 
     layout = Layout(
         HSplit(
             [
                 Window(
-                    FormattedTextControl(header_text),
+                    FormattedTextControl(header_text, focusable=False),
                     height=D.exact(3),
                     dont_extend_height=True,
                 ),
                 Window(
-                    FormattedTextControl(separator_text),
+                    FormattedTextControl(separator_text, focusable=False),
                     height=D.exact(1),
                     dont_extend_height=True,
                 ),
                 Window(
-                    FormattedTextControl(output_text),
+                    output_control,
                     wrap_lines=True,
                     dont_extend_width=False,
                 ),
                 Window(
-                    FormattedTextControl(separator_text),
+                    FormattedTextControl(separator_text, focusable=False),
                     height=D.exact(1),
                     dont_extend_height=True,
                 ),
@@ -189,10 +225,9 @@ def run_tui(ws: Any, ctx: Any) -> None:
                     ),
                     height=D.exact(1),
                     dont_extend_height=True,
-                    get_line_prefix=lambda lineno, wrap_count: [],
                 ),
                 Window(
-                    FormattedTextControl(toolbar_text),
+                    FormattedTextControl(toolbar_text, focusable=False),
                     height=D.exact(1),
                     dont_extend_height=True,
                     style="class:toolbar",
@@ -232,16 +267,13 @@ def _run_engram_command(cmd: str, arg: str, output_lines: list[tuple[str, str]])
             text=True,
             timeout=30,
         )
-        combined = result.stdout + result.stderr
-        if combined.strip():
+        combined = (result.stdout + result.stderr).strip()
+        if combined:
             for line in combined.splitlines():
-                output_lines.append(("class:output", f"  {line}\n"))
+                style = "class:output.error" if result.returncode != 0 else "class:output"
+                output_lines.append((style, f"  {line}\n"))
         else:
             output_lines.append(("class:output.dim", "  (no output)\n"))
-        if result.returncode != 0 and not combined.strip():
-            output_lines.append(
-                ("class:output.error", f"  Command exited with code {result.returncode}\n")
-            )
     except subprocess.TimeoutExpired:
         output_lines.append(("class:output.error", "  Command timed out after 30s\n"))
     except FileNotFoundError:
@@ -254,7 +286,6 @@ def _run_engram_command(cmd: str, arg: str, output_lines: list[tuple[str, str]])
 
 def _find_engram_bin() -> str:
     """Return the path to the engram binary."""
-    # Prefer the same binary that launched us
     argv0 = sys.argv[0]
     if os.path.isfile(argv0) and os.access(argv0, os.X_OK):
         return argv0
