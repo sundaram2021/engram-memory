@@ -504,7 +504,7 @@ class PostgresStorage(BaseStorage):
 
     async def conflict_exists(self, fact_a_id: str, fact_b_id: str, status: str = "open") -> bool:
         """Check if a conflict already exists between two facts (in either order) within this workspace.
-        
+
         Args:
             fact_a_id: First fact ID
             fact_b_id: Second fact ID
@@ -512,17 +512,17 @@ class PostgresStorage(BaseStorage):
         """
         conditions = [
             "((fact_a_id = $1 AND fact_b_id = $2) OR (fact_a_id = $2 AND fact_b_id = $1))",
-            "workspace_id = $3"
+            "workspace_id = $3",
         ]
         params = [fact_a_id, fact_b_id, self.workspace_id]
         param_idx = 4
-        
+
         if status is not None:
             conditions.append(f"status = ${param_idx}")
             params.append(status)
-        
+
         query = f"SELECT 1 FROM conflicts WHERE {' AND '.join(conditions)}"
-        
+
         async with self.acquire() as conn:
             row = await conn.fetchrow(query, *params)
         return row is not None

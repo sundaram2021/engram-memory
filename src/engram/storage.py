@@ -128,7 +128,9 @@ class BaseStorage(ABC):
     async def insert_conflict(self, conflict: dict[str, Any]) -> None: ...
 
     @abstractmethod
-    async def conflict_exists(self, fact_a_id: str, fact_b_id: str, status: str = "open") -> bool: ...
+    async def conflict_exists(
+        self, fact_a_id: str, fact_b_id: str, status: str = "open"
+    ) -> bool: ...
 
     @abstractmethod
     async def get_conflicts(self, scope: str | None = None, status: str = "open") -> list[dict]: ...
@@ -1027,25 +1029,24 @@ class SQLiteStorage(BaseStorage):
 
     async def conflict_exists(self, fact_a_id: str, fact_b_id: str, status: str = "open") -> bool:
         """Check if a conflict already exists between two facts (in either order) within this workspace.
-        
+
         Args:
             fact_a_id: First fact ID
-            fact_b_id: Second fact ID  
+            fact_b_id: Second fact ID
             status: Only check conflicts with this status (default: "open"). Pass None to check all.
         """
         conditions = [
             "workspace_id = ?",
-            "((fact_a_id = ? AND fact_b_id = ?) OR (fact_a_id = ? AND fact_b_id = ?))"
+            "((fact_a_id = ? AND fact_b_id = ?) OR (fact_a_id = ? AND fact_b_id = ?))",
         ]
         params: list[Any] = [self.workspace_id, fact_a_id, fact_b_id, fact_b_id, fact_a_id]
-        
+
         if status is not None:
             conditions.append("status = ?")
             params.append(status)
-        
+
         cursor = await self.db.execute(
-            f"SELECT 1 FROM conflicts WHERE {' AND '.join(conditions)}",
-            params
+            f"SELECT 1 FROM conflicts WHERE {' AND '.join(conditions)}", params
         )
         return await cursor.fetchone() is not None
 
