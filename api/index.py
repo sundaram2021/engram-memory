@@ -608,18 +608,11 @@ def _render_landing() -> str:
 
   <!-- Install -->
   <div class="card reveal" id="install">
-    <div class="section-label">Get started</div>
-    <div class="section-title">Up and running in minutes.</div>
-    <div class="section-desc">Create an account, run the installer, and ask your agent to finish setup. That's it.</div>
-
     <div class="install-steps">
       <div class="install-step">
         <div class="step-num">1</div>
         <div class="step-content">
           <div class="step-title">Create an account</div>
-          <div class="step-desc" style="margin-top:8px;font-size:14px;color:var(--t2);line-height:1.6;">
-            Sign up at the dashboard, then create a new workspace or join an existing one with an invite key from a teammate.
-          </div>
           <a href="/dashboard" class="btn-step-cta" style="display:inline-block;margin-top:12px;
             padding:9px 20px;background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.25);
             border-radius:9px;color:var(--em4);font-size:13px;font-weight:600;text-decoration:none;
@@ -679,15 +672,6 @@ def _render_landing() -> str:
           <div class="code-block" style="margin-top:14px;">
             <button class="copy-btn" onclick="copyCode('engram-cmd', event)">Copy</button>
             <div id="engram-cmd">engram</div>
-          </div>
-          <div style="margin-top:14px;display:flex;align-items:flex-start;gap:10px;padding:14px 16px;
-            background:rgba(52,211,153,0.05);border:1px solid rgba(52,211,153,0.12);border-radius:10px;">
-            <svg style="flex-shrink:0;margin-top:1px;" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--emerald-400)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4m0 4h.01"/></svg>
-            <span style="font-size:13px;color:var(--t2);line-height:1.6;">
-              Prefer a visual interface? Review and resolve conflicts from the
-              <a href="/dashboard" style="color:var(--em4);text-decoration:none;font-weight:600;">web dashboard</a> at
-              <a href="https://engram-memory.com/dashboard" style="color:var(--em4);text-decoration:none;">engram-memory.com</a>.
-            </span>
           </div>
         </div>
       </div>
