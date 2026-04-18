@@ -14,7 +14,7 @@ def _render_landing() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Engram — The Conflict &amp; Liability Platform for Agents</title>
+  <title>Engram — Shared Memory for Your AI Agents</title>
   <meta name="description" content="Engram is a shared memory ledger for your team. When one agent learns a fact, every other agent knows it instantly. If they contradict each other, Engram catches it before they break your code.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -593,7 +593,7 @@ def _render_landing() -> str:
 <section class="hero">
   <div class="container">
     <div class="hero-badge"><span class="hero-badge-dot"></span>MCP-compatible · Open source</div>
-    <h1>The Conflict &amp; Liability Platform for Agents.</h1>
+    <h1>Shared Memory for Your AI Agents.</h1>
     <p class="subtitle">
       Engram is "Git for AI memory." It syncs knowledge across agents instantly and flags logic conflicts before they ship. By anchoring every decision to a verified fact, it creates a permanent audit trail that connects agent output to human responsibility.
     </p>
