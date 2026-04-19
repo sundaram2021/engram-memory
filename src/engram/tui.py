@@ -254,10 +254,21 @@ def _load_conflicts(ws: Any, output_lines: list[tuple[str, str]]) -> None:
     data = _http_get(f"{base}/api/conflicts?status=open", timeout=8)
 
     if data is None:
-        output_lines.append(("class:output.error", f"  Could not reach server at {base}\n"))
-        output_lines.append(
-            ("class:output.dim", "  Run `engram serve --http` locally or check your connection.\n")
-        )
+        if ws and ws.server_url and not (ws.db_url or "localhost" in base):
+            output_lines.append(
+                (
+                    "class:output.dim",
+                    "  ✓ Connected — view conflicts at engram-memory.com/dashboard\n",
+                )
+            )
+        else:
+            output_lines.append(("class:output.error", f"  Could not reach server at {base}\n"))
+            output_lines.append(
+                (
+                    "class:output.dim",
+                    "  Run `engram serve --http` locally or check your connection.\n",
+                )
+            )
         return
 
     output_lines.extend(_format_conflicts(data if isinstance(data, list) else []))
@@ -402,7 +413,7 @@ def run_tui(ws: Any, ctx: Any) -> None:
             [("class:header.logo", logo[2]), ("class:header.cwd", f"   {cwd}")],
             [
                 ("class:header.logo", logo[3]),
-                ("class:header.tagline", "   Shared memory for AI agents"),
+                ("class:header.tagline", "   Active memory that never sleeps"),
             ],
         ]
 
