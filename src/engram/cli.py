@@ -144,6 +144,30 @@ _ENGRAM_MCP_ENTRY = {
 }
 
 
+def _load_install_credentials() -> tuple[str, str]:
+    """Return (mcp_url, invite_key) for MCP config.
+
+    Project .engram.env takes priority over ~/.engram/credentials so that
+    running `engram install` inside a project directory always wires up the
+    correct workspace.
+    """
+    server_url = "https://mcp.engram-memory.com/mcp"
+    invite_key = ""
+    for path in [
+        Path.home() / ".engram" / "credentials",
+        Path.cwd() / ".engram.env",
+    ]:
+        if path.exists():
+            for line in path.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("ENGRAM_SERVER_URL="):
+                    url = line[len("ENGRAM_SERVER_URL="):].strip().rstrip("/")
+                    server_url = url if url.endswith("/mcp") else url + "/mcp"
+                elif line.startswith("ENGRAM_INVITE_KEY="):
+                    invite_key = line[len("ENGRAM_INVITE_KEY="):].strip()
+    return server_url, invite_key
+
+
 def _engram_mcp_entry_for_client(client_name: str) -> dict[str, object]:
     import os
 
@@ -428,7 +452,66 @@ def _write_claude_code_hook(dry_run: bool) -> bool:
             }
         )
 
+    # Write the hosted MCP entry with the invite key so the correct workspace
+    # is connected.  .engram.env overrides ~/.engram/credentials, so running
+    # install inside a project directory always picks the project's key.
+    mcp_url, invite_key = _load_install_credentials()
+    if invite_key:
+        settings.setdefault("mcpServers", {})["engram"] = {
+            "url": mcp_url,
+            "headers": {"Authorization": f"Bearer {invite_key}"},
+        }
+
     settings_path.write_text(json.dumps(settings, indent=2))
+    return True
+
+
+def _write_project_claude_mcp_config(dry_run: bool) -> bool:
+    """Write project-level .claude/settings.local.json with the invite key from .engram.env.
+
+    This ensures the project's workspace key overrides any global key when Claude
+    Code is opened in this directory — preventing the wrong-workspace-looks-connected
+    problem when a user has multiple Engram workspaces.
+
+    Returns True if written (or would be in dry-run mode).
+    """
+    env_file = Path.cwd() / ".engram.env"
+    if not env_file.exists():
+        return False
+
+    invite_key = ""
+    server_url = "https://mcp.engram-memory.com/mcp"
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if line.startswith("ENGRAM_INVITE_KEY="):
+            invite_key = line[len("ENGRAM_INVITE_KEY="):].strip()
+        elif line.startswith("ENGRAM_SERVER_URL="):
+            url = line[len("ENGRAM_SERVER_URL="):].strip().rstrip("/")
+            server_url = url if url.endswith("/mcp") else url + "/mcp"
+
+    if not invite_key:
+        return False
+
+    local_settings_path = Path.cwd() / ".claude" / "settings.local.json"
+
+    if dry_run:
+        click.echo(f"[dry-run] Would write project MCP override to {local_settings_path}")
+        return True
+
+    local_settings_path.parent.mkdir(parents=True, exist_ok=True)
+    if local_settings_path.exists():
+        try:
+            settings = json.loads(local_settings_path.read_text())
+        except Exception:
+            settings = {}
+    else:
+        settings = {}
+
+    settings.setdefault("mcpServers", {})["engram"] = {
+        "url": server_url,
+        "headers": {"Authorization": f"Bearer {invite_key}"},
+    }
+    local_settings_path.write_text(json.dumps(settings, indent=2))
     return True
 
 
@@ -783,6 +866,11 @@ def install(dry_run: bool) -> None:
     # Write the Kiro promptSubmit hook to the current project directory
     kiro_hook_written = _write_kiro_hook(Path.cwd(), dry_run)
 
+    # When .engram.env exists, write a project-level .claude/settings.local.json
+    # override so this project always connects to the correct workspace — even if
+    # the global ~/.claude/settings.json has a different (or stale) invite key.
+    project_mcp_written = _write_project_claude_mcp_config(dry_run)
+
     if added:
         click.echo(f"✓ Engram added to: {', '.join(added)}")
     if skipped:
@@ -797,6 +885,8 @@ def install(dry_run: bool) -> None:
         click.echo("⚡ Auto-commit hook installed: every Cursor message → Engram")
     if kiro_hook_written:
         click.echo("⚡ Auto-commit hook installed: every Kiro message → Engram")
+    if project_mcp_written:
+        click.echo("🔑 Project MCP override written: .claude/settings.local.json → correct workspace")
 
     if added:
         click.echo("\n→ Restart your editor and ask your agent: 'Set up Engram for my agents'")
