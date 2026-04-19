@@ -525,6 +525,29 @@ class PostgresStorage(BaseStorage):
         _defaults = {"workspace_id": self.workspace_id, "conflict_type": "genuine"}
         values = [conflict.get(c, _defaults.get(c)) for c in cols]
         async with self.acquire() as conn:
+            existing = await conn.fetchrow(
+                """SELECT 1 FROM conflicts
+                   WHERE workspace_id = $1
+                     AND fact_a_id = $2
+                     AND fact_b_id = $3
+                   LIMIT 1""",
+                self.workspace_id,
+                conflict.get("fact_a_id"),
+                conflict.get("fact_b_id"),
+            )
+            if existing:
+                return
+
+            dismissed = await conn.fetchrow(
+                """SELECT 1 FROM dismissed_conflicts
+                   WHERE conflict_id = $1 AND workspace_id = $2
+                   LIMIT 1""",
+                conflict.get("id"),
+                self.workspace_id,
+            )
+            if dismissed:
+                return
+
             await conn.execute(
                 f"INSERT INTO conflicts ({col_names}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",
                 *values,
@@ -577,7 +600,13 @@ class PostgresStorage(BaseStorage):
         return row is not None
 
     async def get_conflicts(self, scope: str | None = None, status: str = "open") -> list[dict]:
-        conditions = ["c.workspace_id = $1"]
+        conditions = [
+            "c.workspace_id = $1",
+            """NOT EXISTS (
+                SELECT 1 FROM dismissed_conflicts dc
+                WHERE dc.conflict_id = c.id AND dc.workspace_id = c.workspace_id
+            )""",
+        ]
         params: list[Any] = [self.workspace_id]
         idx = 2
 
@@ -621,20 +650,31 @@ class PostgresStorage(BaseStorage):
         resolved_by: str | None = None,
     ) -> bool:
         now = _now_ts()
-        new_status = "dismissed" if resolution_type == "dismissed" else "resolved"
         async with self.acquire() as conn:
-            result = await conn.execute(
-                "UPDATE conflicts SET status=$1, resolution_type=$2, resolution=$3, "
-                "resolved_by=$4, resolved_at=$5 "
-                "WHERE id=$6 AND status='open' AND workspace_id=$7",
-                new_status,
-                resolution_type,
-                resolution,
-                resolved_by,
-                now,
-                conflict_id,
-                self.workspace_id,
-            )
+            async with conn.transaction():
+                result = await conn.execute(
+                    "UPDATE conflicts SET status=$1, resolution_type=$2, resolution=$3, "
+                    "resolved_by=$4, resolved_at=$5 "
+                    "WHERE id=$6 AND status='open' AND workspace_id=$7",
+                    "dismissed" if resolution_type == "dismissed" else "resolved",
+                    resolution_type,
+                    resolution,
+                    resolved_by,
+                    now,
+                    conflict_id,
+                    self.workspace_id,
+                )
+                if result == "UPDATE 1" and resolution_type == "dismissed":
+                    await conn.execute(
+                        """INSERT INTO dismissed_conflicts(conflict_id, workspace_id, dismissed_at)
+                           VALUES ($1, $2, $3)
+                           ON CONFLICT (conflict_id) DO UPDATE
+                           SET workspace_id = EXCLUDED.workspace_id,
+                               dismissed_at = EXCLUDED.dismissed_at""",
+                        conflict_id,
+                        self.workspace_id,
+                        now,
+                    )
         return result == "UPDATE 1"
 
     async def get_conflict_by_id(self, conflict_id: str) -> dict | None:
@@ -695,27 +735,42 @@ class PostgresStorage(BaseStorage):
         escalated_at: str | None = None,
     ) -> bool:
         now = _now_ts()
-        new_status = "dismissed" if resolution_type == "dismissed" else "resolved"
         async with self.acquire() as conn:
-            result = await conn.execute(
-                "UPDATE conflicts SET status=$1, resolution_type=$2, resolution=$3, "
-                "resolved_by=$4, resolved_at=$5, auto_resolved=TRUE, escalated_at=$6 "
-                "WHERE id=$7 AND status='open' AND workspace_id=$8",
-                new_status,
-                resolution_type,
-                resolution,
-                resolved_by,
-                now,
-                escalated_at,
-                conflict_id,
-                self.workspace_id,
-            )
+            async with conn.transaction():
+                result = await conn.execute(
+                    "UPDATE conflicts SET status=$1, resolution_type=$2, resolution=$3, "
+                    "resolved_by=$4, resolved_at=$5, auto_resolved=TRUE, escalated_at=$6 "
+                    "WHERE id=$7 AND status='open' AND workspace_id=$8",
+                    "dismissed" if resolution_type == "dismissed" else "resolved",
+                    resolution_type,
+                    resolution,
+                    resolved_by,
+                    now,
+                    escalated_at,
+                    conflict_id,
+                    self.workspace_id,
+                )
+                if result == "UPDATE 1" and resolution_type == "dismissed":
+                    await conn.execute(
+                        """INSERT INTO dismissed_conflicts(conflict_id, workspace_id, dismissed_at)
+                           VALUES ($1, $2, $3)
+                           ON CONFLICT (conflict_id) DO UPDATE
+                           SET workspace_id = EXCLUDED.workspace_id,
+                               dismissed_at = EXCLUDED.dismissed_at""",
+                        conflict_id,
+                        self.workspace_id,
+                        now,
+                    )
         return result == "UPDATE 1"
 
     async def get_stale_open_conflicts(self, older_than_hours: int = 72) -> list[dict]:
         async with self.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT * FROM conflicts WHERE status='open' AND workspace_id=$1 "
+                "AND NOT EXISTS ("
+                "    SELECT 1 FROM dismissed_conflicts dc "
+                "    WHERE dc.conflict_id = conflicts.id AND dc.workspace_id = conflicts.workspace_id"
+                ") "
                 "AND detected_at < NOW() - ($2 * INTERVAL '1 hour') "
                 "ORDER BY detected_at ASC",
                 self.workspace_id,
@@ -953,12 +1008,24 @@ class PostgresStorage(BaseStorage):
         async with self.acquire() as conn:
             if status == "all":
                 row = await conn.fetchrow(
-                    "SELECT COUNT(*) AS cnt FROM conflicts WHERE workspace_id = $1",
+                    """SELECT COUNT(*) AS cnt FROM conflicts
+                       WHERE workspace_id = $1
+                         AND NOT EXISTS (
+                             SELECT 1 FROM dismissed_conflicts dc
+                             WHERE dc.conflict_id = conflicts.id
+                               AND dc.workspace_id = conflicts.workspace_id
+                         )""",
                     self.workspace_id,
                 )
             else:
                 row = await conn.fetchrow(
-                    "SELECT COUNT(*) AS cnt FROM conflicts WHERE status = $1 AND workspace_id = $2",
+                    """SELECT COUNT(*) AS cnt FROM conflicts
+                       WHERE status = $1 AND workspace_id = $2
+                         AND NOT EXISTS (
+                             SELECT 1 FROM dismissed_conflicts dc
+                             WHERE dc.conflict_id = conflicts.id
+                               AND dc.workspace_id = conflicts.workspace_id
+                         )""",
                     status,
                     self.workspace_id,
                 )
@@ -1114,7 +1181,11 @@ class PostgresStorage(BaseStorage):
         async with self.acquire() as conn:
             rows = await conn.fetch(
                 "SELECT fact_a_id, fact_b_id FROM conflicts "
-                "WHERE status = 'open' AND workspace_id = $1",
+                "WHERE status = 'open' AND workspace_id = $1 "
+                "AND NOT EXISTS ("
+                "    SELECT 1 FROM dismissed_conflicts dc "
+                "    WHERE dc.conflict_id = conflicts.id AND dc.workspace_id = conflicts.workspace_id"
+                ")",
                 self.workspace_id,
             )
         ids: set[str] = set()

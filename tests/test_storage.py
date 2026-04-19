@@ -171,6 +171,21 @@ async def test_conflict_exists(storage: Storage):
 
 
 @pytest.mark.asyncio
+async def test_duplicate_conflict_pair_is_inserted_once(storage: Storage):
+    f1 = _fact(content="rate limit is 100")
+    f2 = _fact(content="rate limit is 200")
+    for f in (f1, f2):
+        await storage.insert_fact(f)
+
+    await storage.insert_conflict(_conflict(f1["id"], f2["id"]))
+    await storage.insert_conflict(_conflict(f2["id"], f1["id"]))
+
+    conflicts = await storage.get_conflicts(status="all")
+    assert len(conflicts) == 1
+    assert await storage.count_conflicts("all") == 1
+
+
+@pytest.mark.asyncio
 async def test_get_conflicting_fact_ids(storage: Storage):
     f1 = _fact()
     f2 = _fact()

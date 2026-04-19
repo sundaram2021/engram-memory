@@ -8,6 +8,7 @@ correctly settles disagreements — leaving only the winning fact active.
 from __future__ import annotations
 
 
+import numpy as np
 import pytest
 
 from engram.engine import EngramEngine
@@ -190,6 +191,62 @@ async def test_dismissed_resolution_leaves_both_facts_active(
     f2 = await storage.get_fact_by_id(r2["fact_id"])
     assert f1["valid_until"] is None
     assert f2["valid_until"] is None
+
+
+@pytest.mark.asyncio
+async def test_dismissed_conflict_stays_hidden_after_refresh(
+    engine: EngramEngine, storage: Storage, monkeypatch
+):
+    """Dismissed conflicts should stay hidden even if refresh/detection rechecks the same pair."""
+    monkeypatch.setattr(
+        "engram.embeddings.encode",
+        lambda text: np.array([1.0, 0.0], dtype=np.float32),
+    )
+    monkeypatch.setattr("engram.embeddings.get_model_version", lambda: "test-version")
+
+    r1 = await engine.commit(
+        content="The auth service rate limit is 1000 req/s per IP",
+        scope="conflicts-refresh",
+        confidence=0.9,
+        agent_id="agent-a",
+    )
+    r2 = await engine.commit(
+        content="The auth service rate limit is 2000 req/s per IP",
+        scope="conflicts-refresh",
+        confidence=0.9,
+        agent_id="agent-b",
+    )
+
+    await engine._detection_queue.join()
+
+    conflicts = await engine.get_conflicts(scope="conflicts-refresh", status="open")
+    assert len(conflicts) == 1
+
+    conflict_id = conflicts[0]["conflict_id"]
+    await engine.resolve(
+        conflict_id=conflict_id,
+        resolution_type="dismissed",
+        resolution="Dismissed as a dashboard false positive",
+    )
+
+    # Simulate a dashboard refresh/background pass trying to surface the same pair again.
+    await storage.insert_conflict(
+        {
+            "id": "replacement-conflict-id",
+            "fact_a_id": r1["fact_id"],
+            "fact_b_id": r2["fact_id"],
+            "detected_at": conflicts[0]["detected_at"],
+            "detection_tier": "tier2_numeric",
+            "nli_score": None,
+            "explanation": "retry insert after dismiss",
+            "severity": "high",
+            "status": "open",
+            "conflict_type": "genuine",
+        }
+    )
+
+    refreshed = await engine.get_conflicts(scope="conflicts-refresh", status="all")
+    assert refreshed == []
 
 
 # ── conflict_type classification ─────────────────────────────────────

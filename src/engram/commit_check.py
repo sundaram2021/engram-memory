@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,36 @@ def load_credentials(cwd: Path | None = None) -> tuple[str, str]:
 
     if not server_url:
         server_url = mcp_url_to_base_url(mcp_url) if mcp_url else "http://127.0.0.1:7474"
+
+    return server_url.rstrip("/"), invite_key
+
+
+def load_project_credentials(cwd: Path | None = None) -> tuple[str, str]:
+    """Load workspace credentials strictly from the project's .engram.env file."""
+    cwd = cwd or Path.cwd()
+    env_path = cwd / ".engram.env"
+    if not env_path.exists():
+        raise RuntimeError(f"{env_path} not found")
+
+    server_url = ""
+    mcp_url = ""
+    invite_key = ""
+    for raw_line in env_path.read_text().splitlines():
+        line = raw_line.strip()
+        if line.startswith("ENGRAM_SERVER_URL="):
+            server_url = line[len("ENGRAM_SERVER_URL=") :].strip()
+        elif line.startswith("ENGRAM_MCP_URL="):
+            mcp_url = line[len("ENGRAM_MCP_URL=") :].strip()
+        elif line.startswith("ENGRAM_INVITE_KEY="):
+            invite_key = line[len("ENGRAM_INVITE_KEY=") :].strip()
+
+    if not server_url:
+        if not mcp_url:
+            raise RuntimeError("ENGRAM_SERVER_URL or ENGRAM_MCP_URL is required in .engram.env")
+        server_url = mcp_url_to_base_url(mcp_url)
+
+    if not invite_key:
+        raise RuntimeError("ENGRAM_INVITE_KEY is required in .engram.env")
 
     return server_url.rstrip("/"), invite_key
 
@@ -149,6 +180,44 @@ def query_workspace(
         return json.loads(response.read().decode("utf-8"))
 
 
+def fetch_open_conflicts(
+    base_url: str,
+    invite_key: str,
+    timeout: int = 10,
+) -> list[dict[str, Any]]:
+    """Fetch unresolved/open conflicts from Engram's REST API."""
+    headers = {
+        "Accept": "application/json",
+    }
+    if invite_key:
+        headers["Authorization"] = f"Bearer {invite_key}"
+
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/api/conflicts?status=open",
+        headers=headers,
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace").strip()
+        detail = body or exc.reason
+        raise RuntimeError(f"conflict lookup failed: HTTP {exc.code} {detail}") from exc
+
+    if isinstance(payload, dict):
+        conflicts = payload.get("conflicts", [])
+    elif isinstance(payload, list):
+        conflicts = payload
+    else:
+        raise RuntimeError("conflict lookup returned an unexpected payload")
+
+    if not isinstance(conflicts, list):
+        raise RuntimeError("conflict lookup returned a malformed conflicts list")
+
+    return conflicts
+
+
 def filter_relevant_facts(
     facts: list[dict[str, Any]],
     threshold: float,
@@ -193,5 +262,31 @@ def format_commit_warning(
     else:
         lines.append("Advisory only: commit can continue.")
         lines.append("Use --strict to block when relevant facts are found.")
+
+    return "\n".join(lines)
+
+
+def format_conflict_blocker(conflicts: list[dict[str, Any]]) -> str:
+    """Format a blocking pre-commit message for unresolved conflicts."""
+    lines = [
+        f"Engram blocked this commit: {len(conflicts)} unresolved conflict(s) remain open.",
+        "Resolve or dismiss them before committing.",
+        "",
+    ]
+
+    for idx, conflict in enumerate(conflicts, start=1):
+        conflict_id = str(conflict.get("conflict_id") or conflict.get("id") or "-")
+        explanation = (conflict.get("explanation") or "Conflicting information detected").strip()
+        fact_a = conflict.get("fact_a") or {
+            "content": conflict.get("content_a"),
+            "scope": conflict.get("scope_a"),
+        }
+        fact_b = conflict.get("fact_b") or {
+            "content": conflict.get("content_b"),
+            "scope": conflict.get("scope_b"),
+        }
+        lines.append(f"{idx}. {conflict_id[:12]}  {explanation}")
+        lines.append(f"   A [{fact_a.get('scope') or '-'}] {(fact_a.get('content') or '').strip()}")
+        lines.append(f"   B [{fact_b.get('scope') or '-'}] {(fact_b.get('content') or '').strip()}")
 
     return "\n".join(lines)

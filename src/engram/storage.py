@@ -1017,6 +1017,26 @@ class SQLiteStorage(BaseStorage):
         if a > b:
             conflict = {**conflict, "fact_a_id": b, "fact_b_id": a}
 
+        cursor = await self.db.execute(
+            """SELECT 1 FROM conflicts
+               WHERE workspace_id = ?
+                 AND fact_a_id = ?
+                 AND fact_b_id = ?
+               LIMIT 1""",
+            (self.workspace_id, conflict.get("fact_a_id"), conflict.get("fact_b_id")),
+        )
+        if await cursor.fetchone():
+            return
+
+        cursor = await self.db.execute(
+            """SELECT 1 FROM dismissed_conflicts
+               WHERE conflict_id = ? AND workspace_id = ?
+               LIMIT 1""",
+            (conflict.get("id"), self.workspace_id),
+        )
+        if await cursor.fetchone():
+            return
+
         cols = [
             "id",
             "fact_a_id",
@@ -1085,7 +1105,13 @@ class SQLiteStorage(BaseStorage):
         return await cursor.fetchone() is not None
 
     async def get_conflicts(self, scope: str | None = None, status: str = "open") -> list[dict]:
-        conditions = ["c.workspace_id = ?"]
+        conditions = [
+            "c.workspace_id = ?",
+            """NOT EXISTS (
+                SELECT 1 FROM dismissed_conflicts dc
+                WHERE dc.conflict_id = c.id AND dc.workspace_id = c.workspace_id
+            )""",
+        ]
         params: list[Any] = [self.workspace_id]
 
         if status != "all":
@@ -1139,6 +1165,12 @@ class SQLiteStorage(BaseStorage):
                 conflict_id,
             ),
         )
+        if cursor.rowcount > 0 and resolution_type == "dismissed":
+            await self.db.execute(
+                """INSERT OR REPLACE INTO dismissed_conflicts(conflict_id, workspace_id, dismissed_at)
+                   VALUES (?, ?, ?)""",
+                (conflict_id, self.workspace_id, now),
+            )
         await self.db.commit()
         return cursor.rowcount > 0
 
@@ -1223,6 +1255,12 @@ class SQLiteStorage(BaseStorage):
                 conflict_id,
             ),
         )
+        if cursor.rowcount > 0 and resolution_type == "dismissed":
+            await self.db.execute(
+                """INSERT OR REPLACE INTO dismissed_conflicts(conflict_id, workspace_id, dismissed_at)
+                   VALUES (?, ?, ?)""",
+                (conflict_id, self.workspace_id, now),
+            )
         await self.db.commit()
         return cursor.rowcount > 0
 
@@ -1232,6 +1270,10 @@ class SQLiteStorage(BaseStorage):
             """SELECT * FROM conflicts
                WHERE status = 'open'
                  AND workspace_id = ?
+                 AND NOT EXISTS (
+                     SELECT 1 FROM dismissed_conflicts dc
+                     WHERE dc.conflict_id = conflicts.id AND dc.workspace_id = conflicts.workspace_id
+                 )
                  AND datetime(detected_at) < datetime('now', ? || ' hours')
                ORDER BY detected_at ASC""",
             (
@@ -1546,12 +1588,22 @@ class SQLiteStorage(BaseStorage):
     async def count_conflicts(self, status: str = "open") -> int:
         if status == "all":
             cursor = await self.db.execute(
-                "SELECT COUNT(*) as cnt FROM conflicts WHERE workspace_id = ?",
+                """SELECT COUNT(*) as cnt FROM conflicts
+                   WHERE workspace_id = ?
+                     AND NOT EXISTS (
+                         SELECT 1 FROM dismissed_conflicts dc
+                         WHERE dc.conflict_id = conflicts.id AND dc.workspace_id = conflicts.workspace_id
+                     )""",
                 (self.workspace_id,),
             )
         else:
             cursor = await self.db.execute(
-                "SELECT COUNT(*) as cnt FROM conflicts WHERE status = ? AND workspace_id = ?",
+                """SELECT COUNT(*) as cnt FROM conflicts
+                   WHERE status = ? AND workspace_id = ?
+                     AND NOT EXISTS (
+                         SELECT 1 FROM dismissed_conflicts dc
+                         WHERE dc.conflict_id = conflicts.id AND dc.workspace_id = conflicts.workspace_id
+                     )""",
                 (status, self.workspace_id),
             )
         row = await cursor.fetchone()
@@ -1828,7 +1880,13 @@ class SQLiteStorage(BaseStorage):
 
     async def get_open_conflict_fact_ids(self) -> set[str]:
         cursor = await self.db.execute(
-            "SELECT fact_a_id, fact_b_id FROM conflicts WHERE status = 'open' AND workspace_id = ?",
+            """SELECT fact_a_id, fact_b_id FROM conflicts
+               WHERE status = 'open'
+                 AND workspace_id = ?
+                 AND NOT EXISTS (
+                     SELECT 1 FROM dismissed_conflicts dc
+                     WHERE dc.conflict_id = conflicts.id AND dc.workspace_id = conflicts.workspace_id
+                 )""",
             (self.workspace_id,),
         )
         rows = await cursor.fetchall()

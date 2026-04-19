@@ -195,3 +195,31 @@ def test_install_writes_vscode_copilot_http_server(tmp_path, monkeypatch):
             "type": "http",
             "url": "https://www.engram-memory.com/mcp",
         }
+
+
+def test_install_writes_git_pre_commit_hook(tmp_path, monkeypatch):
+    runner = CliRunner()
+    project = tmp_path / "repo"
+    hook_dir = project / ".git" / "hooks"
+    hook_dir.mkdir(parents=True)
+    workspace_path = tmp_path / ".engram" / "workspace.json"
+
+    monkeypatch.chdir(project)
+
+    with (
+        patch("pathlib.Path.home", return_value=tmp_path),
+        patch("engram.workspace.WORKSPACE_PATH", workspace_path),
+        patch("engram.cli._MCP_CLIENTS", {}),
+        patch("engram.cli._try_claude_code_cli", lambda *args, **kwargs: None),
+        patch("engram.cli._write_claude_code_hook", return_value=False),
+        patch("engram.cli._write_windsurf_hook", return_value=False),
+        patch("engram.cli._write_cursor_hook", return_value=False),
+        patch("engram.cli._write_kiro_hook", return_value=False),
+        patch("engram.cli._write_project_claude_mcp_config", return_value=False),
+    ):
+        result = runner.invoke(main, ["install"])
+
+    hook_path = hook_dir / "pre-commit"
+    assert result.exit_code == 0
+    assert hook_path.exists()
+    assert 'engram pre-commit-hook "$@"' in hook_path.read_text()

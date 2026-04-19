@@ -73,7 +73,14 @@ async def handle_conflicts(request: Request) -> Response:
 
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        conds = ["c.workspace_id = $1", "c.status = $2"]
+        conds = [
+            "c.workspace_id = $1",
+            "c.status = $2",
+            """NOT EXISTS (
+                SELECT 1 FROM dismissed_conflicts dc
+                WHERE dc.conflict_id = c.id AND dc.workspace_id = c.workspace_id
+            )""",
+        ]
         args: list[Any] = [workspace_id, status_filter]
         if scope:
             conds.append("(fa.scope = $3 OR fb.scope = $3)")

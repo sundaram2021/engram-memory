@@ -4,9 +4,12 @@ from pathlib import Path
 
 from engram.commit_check import (
     build_commit_query,
+    fetch_open_conflicts,
     filter_relevant_facts,
+    format_conflict_blocker,
     format_commit_warning,
     load_credentials,
+    load_project_credentials,
     mcp_url_to_base_url,
     summarize_staged_diff,
 )
@@ -105,3 +108,52 @@ def test_load_credentials_prefers_project_env(tmp_path, monkeypatch):
 
     assert server_url == "https://local.example.com"
     assert invite_key == "ek_live_local"
+
+
+def test_load_project_credentials_reads_dot_engram_env(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".engram.env").write_text(
+        "ENGRAM_MCP_URL=https://engram.example.com/mcp\nENGRAM_INVITE_KEY=ek_live_local\n"
+    )
+
+    server_url, invite_key = load_project_credentials(project)
+
+    assert server_url == "https://engram.example.com"
+    assert invite_key == "ek_live_local"
+
+
+def test_format_conflict_blocker_lists_conflicts():
+    blocker = format_conflict_blocker(
+        [
+            {
+                "conflict_id": "conflict-1234567890",
+                "explanation": "Rate limit disagreement",
+                "fact_a": {"scope": "auth", "content": "Limit is 1000 req/s"},
+                "fact_b": {"scope": "auth", "content": "Limit is 2000 req/s"},
+            }
+        ]
+    )
+
+    assert "blocked this commit" in blocker
+    assert "Rate limit disagreement" in blocker
+    assert "Limit is 1000 req/s" in blocker
+    assert "Limit is 2000 req/s" in blocker
+
+
+def test_fetch_open_conflicts_accepts_list_payload(monkeypatch):
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'[{"conflict_id":"c1"}]'
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout=10: _Response())
+
+    conflicts = fetch_open_conflicts("https://engram.example.com", "ek_live_test")
+
+    assert conflicts == [{"conflict_id": "c1"}]

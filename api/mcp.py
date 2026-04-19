@@ -125,7 +125,20 @@ CREATE TABLE IF NOT EXISTS conflicts (
     workspace_id    TEXT NOT NULL
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conflicts_pair_unique ON conflicts(
+    workspace_id,
+    LEAST(fact_a_id, fact_b_id),
+    GREATEST(fact_a_id, fact_b_id)
+);
 CREATE INDEX IF NOT EXISTS idx_conflicts_workspace ON conflicts(workspace_id, status);
+
+CREATE TABLE IF NOT EXISTS dismissed_conflicts (
+    conflict_id   TEXT PRIMARY KEY REFERENCES conflicts(id),
+    workspace_id  TEXT NOT NULL,
+    dismissed_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dismissed_conflicts_workspace
+    ON dismissed_conflicts(workspace_id);
 
 CREATE TABLE IF NOT EXISTS agents (
     agent_id      TEXT NOT NULL,
@@ -165,7 +178,7 @@ CREATE TABLE IF NOT EXISTS user_workspaces (
 # ── DB pool ──────────────────────────────────────────────────────────
 
 # Bump this version whenever _SCHEMA_SQL changes (new tables, columns, indexes).
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _pool: Any = None
 _schema_version_applied: int = 0
 
@@ -521,6 +534,14 @@ async def _detect_conflicts_heuristic(workspace_id: str, pool: Any) -> None:
                 if existing:
                     continue
                 cid = str(uuid.uuid4())
+                dismissed = await conn.fetchrow(
+                    """SELECT 1 FROM dismissed_conflicts
+                       WHERE conflict_id = $1 AND workspace_id = $2""",
+                    cid,
+                    workspace_id,
+                )
+                if dismissed:
+                    continue
                 await conn.execute(
                     """INSERT INTO conflicts
                        (id, fact_a_id, fact_b_id, explanation, severity, workspace_id)
@@ -759,6 +780,14 @@ async def _detect_conflicts(
                     if existing:
                         continue
                     cid = str(uuid.uuid4())
+                    dismissed = await conn.fetchrow(
+                        """SELECT 1 FROM dismissed_conflicts
+                           WHERE conflict_id = $1 AND workspace_id = $2""",
+                        cid,
+                        workspace_id,
+                    )
+                    if dismissed:
+                        continue
                     question = confusion.get("question", "Ambiguous information detected")
                     await conn.execute(
                         """INSERT INTO conflicts
@@ -1189,7 +1218,14 @@ async def _tool_conflicts(
     await _detect_conflicts_heuristic(workspace_id, pool)
 
     async with _safe(pool) as conn:
-        conds = ["c.workspace_id = $1", "c.status = $2"]
+        conds = [
+            "c.workspace_id = $1",
+            "c.status = $2",
+            """NOT EXISTS (
+                SELECT 1 FROM dismissed_conflicts dc
+                WHERE dc.conflict_id = c.id AND dc.workspace_id = c.workspace_id
+            )""",
+        ]
         args: list[Any] = [workspace_id, status]
         idx = 3
         if scope:
@@ -1239,13 +1275,25 @@ async def _tool_resolve(
             return {"status": "error", "message": "Conflict not found"}
         await conn.execute(
             """UPDATE conflicts
-               SET status = 'resolved', resolved_at = $1, resolution = $2, resolution_type = $3
-               WHERE id = $4""",
+               SET status = $1, resolved_at = $2, resolution = $3, resolution_type = $4
+               WHERE id = $5""",
+            "dismissed" if resolution_type == "dismissed" else "resolved",
             now,
             resolution,
             resolution_type,
             conflict_id,
         )
+        if resolution_type == "dismissed":
+            await conn.execute(
+                """INSERT INTO dismissed_conflicts(conflict_id, workspace_id, dismissed_at)
+                   VALUES ($1, $2, $3)
+                   ON CONFLICT (conflict_id) DO UPDATE
+                   SET workspace_id = EXCLUDED.workspace_id,
+                       dismissed_at = EXCLUDED.dismissed_at""",
+                conflict_id,
+                workspace_id,
+                now,
+            )
         if resolution_type == "winner" and winning_claim_id:
             # Retire the losing fact
             losing = await conn.fetchrow(
