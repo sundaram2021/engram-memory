@@ -213,6 +213,10 @@ def _commit_user_message(ws: Any, message: str) -> None:
 
 def _openai_chat(ws: Any, message: str, output_lines: list[tuple[str, str]]) -> None:
     """Send message to the server /api/chat endpoint (server holds the API key)."""
+    if _is_hosted(ws):
+        output_lines.append(("class:output.dim", "  ✓ Saved to memory.\n"))
+        return
+
     base = _server_url(ws)
     output_lines.append(("class:output.dim", "  Thinking...\n"))
 
