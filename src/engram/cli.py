@@ -161,10 +161,10 @@ def _load_install_credentials() -> tuple[str, str]:
             for line in path.read_text().splitlines():
                 line = line.strip()
                 if line.startswith("ENGRAM_SERVER_URL="):
-                    url = line[len("ENGRAM_SERVER_URL="):].strip().rstrip("/")
+                    url = line[len("ENGRAM_SERVER_URL=") :].strip().rstrip("/")
                     server_url = url if url.endswith("/mcp") else url + "/mcp"
                 elif line.startswith("ENGRAM_INVITE_KEY="):
-                    invite_key = line[len("ENGRAM_INVITE_KEY="):].strip()
+                    invite_key = line[len("ENGRAM_INVITE_KEY=") :].strip()
     return server_url, invite_key
 
 
@@ -484,9 +484,9 @@ def _write_project_claude_mcp_config(dry_run: bool) -> bool:
     for line in env_file.read_text().splitlines():
         line = line.strip()
         if line.startswith("ENGRAM_INVITE_KEY="):
-            invite_key = line[len("ENGRAM_INVITE_KEY="):].strip()
+            invite_key = line[len("ENGRAM_INVITE_KEY=") :].strip()
         elif line.startswith("ENGRAM_SERVER_URL="):
-            url = line[len("ENGRAM_SERVER_URL="):].strip().rstrip("/")
+            url = line[len("ENGRAM_SERVER_URL=") :].strip().rstrip("/")
             server_url = url if url.endswith("/mcp") else url + "/mcp"
 
     if not invite_key:
@@ -886,7 +886,9 @@ def install(dry_run: bool) -> None:
     if kiro_hook_written:
         click.echo("⚡ Auto-commit hook installed: every Kiro message → Engram")
     if project_mcp_written:
-        click.echo("🔑 Project MCP override written: .claude/settings.local.json → correct workspace")
+        click.echo(
+            "🔑 Project MCP override written: .claude/settings.local.json → correct workspace"
+        )
 
     if added:
         click.echo("\n→ Restart your editor and ask your agent: 'Set up Engram for my agents'")
