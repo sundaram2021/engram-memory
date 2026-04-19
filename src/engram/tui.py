@@ -158,7 +158,8 @@ def _commit_user_message(ws: Any, message: str) -> None:
         {
             "content": message,
             "agent_id": "tui-user",
-            "scope": "tui",
+            "scope": "global",
+            "confidence": 0.9,
             "fact_type": "observation",
         },
         timeout=8,
@@ -247,11 +248,13 @@ def _format_conflicts(conflicts: list[dict[str, Any]]) -> list[tuple[str, str]]:
 def _load_conflicts(ws: Any, output_lines: list[tuple[str, str]]) -> None:
     """Fetch open conflicts from the server and append formatted output."""
     base = _server_url(ws)
-    data = _http_get(f"{base}/api/conflicts?status=open")
+    data = _http_get(f"{base}/api/conflicts?status=open", timeout=8)
 
     if data is None:
-        output_lines.append(("class:output.dim", "  (server offline — using local engine)\n"))
-        _run_engram_command("conflicts", "", output_lines)
+        output_lines.append(("class:output.error", f"  Could not reach server at {base}\n"))
+        output_lines.append(
+            ("class:output.dim", "  Run `engram serve --http` locally or check your connection.\n")
+        )
         return
 
     output_lines.extend(_format_conflicts(data if isinstance(data, list) else []))
