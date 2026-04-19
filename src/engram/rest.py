@@ -956,6 +956,92 @@ def build_rest_routes(
         entries = await engine.get_rotation_history(limit=limit)
         return JSONResponse({"entries": entries, "count": len(entries)})
 
+    async def api_chat(request: Request) -> JSONResponse:
+        """POST /api/chat — query OpenAI with Engram fact corpus as context.
+
+        Body (JSON):
+            message   str   required  — the user's message
+            limit     int   optional  — max facts to include (default 20)
+
+        Returns {reply: str} or {error: str}.
+        The OPENAI_API_KEY must be set as a server environment variable.
+        """
+        import http.client
+        import json as _json
+        import os
+
+        try:
+            body = await request.json()
+        except Exception:
+            return _error("Request body must be valid JSON.")
+
+        message = body.get("message", "").strip()
+        if not message:
+            return _error("'message' is required.")
+
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return _error("OPENAI_API_KEY is not configured on the server.", status=503)
+
+        limit = min(int(body.get("limit", 20)), 50)
+
+        # Fetch relevant facts from Engram
+        try:
+            facts = await engine.query(topic=message, limit=limit)
+        except Exception:
+            facts = []
+
+        system_content = (
+            "You are an AI assistant with access to a shared team memory (Engram). "
+            "Use the facts below as context when answering. "
+            "If the facts are not relevant, answer from your general knowledge.\n\n"
+        )
+        if facts:
+            system_content += "Engram fact corpus:\n"
+            for i, fact in enumerate(facts, 1):
+                system_content += f"{i}. {fact.get('content', '')}\n"
+        else:
+            system_content += "No relevant facts found in memory."
+
+        payload = _json.dumps({
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": message},
+            ],
+            "max_tokens": 1024,
+        }).encode()
+
+        try:
+            conn = http.client.HTTPSConnection("api.openai.com", timeout=30)
+            conn.request(
+                "POST",
+                "/v1/chat/completions",
+                payload,
+                {
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(payload)),
+                    "Authorization": f"Bearer {api_key}",
+                },
+            )
+            resp = conn.getresponse()
+            data = _json.loads(resp.read())
+        except Exception as exc:
+            logger.exception("REST /api/chat openai error")
+            return _error(str(exc), status=502)
+
+        if resp.status != 200:
+            err = data.get("error", {})
+            msg = err.get("message") if isinstance(err, dict) else str(err)
+            return _error(f"OpenAI error: {msg}", status=502)
+
+        try:
+            reply = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError):
+            return _error("Unexpected response from OpenAI.", status=502)
+
+        return JSONResponse({"reply": reply})
+
     return [
         Route("/api/commit", api_commit, methods=["POST"]),
         Route("/api/query", api_query, methods=["POST"]),
@@ -999,4 +1085,5 @@ def build_rest_routes(
         # Invite key lifecycle
         Route("/api/invite-key/rotate", api_invite_key_rotate, methods=["POST"]),
         Route("/api/invite-key/history", api_invite_key_history, methods=["GET"]),
+        Route("/api/chat", api_chat, methods=["POST"]),
     ]

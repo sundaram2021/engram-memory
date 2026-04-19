@@ -42,6 +42,7 @@ _STYLE = Style.from_dict(
         "output.dim": "noinherit #555555",
         "output.warn": "noinherit #ffaa00",
         "output.label": "bold noinherit #00dd55",
+        "output.ai": "noinherit #88ddff",
         "toolbar": "noinherit bg:#111111 #444444",
         "toolbar.key": "noinherit bg:#111111 #00dd55",
         "toolbar.sep": "noinherit bg:#111111 #333333",
@@ -59,22 +60,25 @@ _VALID_COMMANDS = {
     "stats",
     "verify",
     "doctor",
+    "merge",
 }
 
 _HELP_LINES: list[tuple[str, str]] = [
     ("class:output.dim", "\n"),
     ("class:output", "  Commands:\n"),
     ("class:output", "    conflicts                           — refresh conflict list\n"),
-    ("class:output", "    resolve <id> keep_a|keep_b|dismiss  — resolve a conflict\n"),
+    ("class:output", "    merge                               — merge with another person's memory\n"),
     ("class:output", "    clear                               — clear output  (Ctrl+L)\n"),
     ("class:output", "    quit / q                            — exit          (Ctrl+C)\n"),
     ("class:output.dim", "\n"),
-    ("class:output.dim", "  Conflicts are shared with the web dashboard in real time.\n"),
+    ("class:output.dim", "  Any other text is sent to the AI with your full fact corpus as context.\n"),
+    ("class:output.dim", "  Every message you send is also saved as an Engram memory.\n"),
     ("class:output.dim", "\n"),
 ]
 
 # Default local server address — matches `engram serve --http`
 _LOCAL_SERVER = "http://localhost:7474"
+
 
 
 # ── server API helpers ────────────────────────────────────────────────
@@ -116,11 +120,61 @@ def _http_post(url: str, body: dict[str, Any], timeout: int = 5) -> tuple[int, A
         return 0, {"error": str(exc)}
 
 
+
 def _server_url(ws: Any) -> str:
     """Return the server base URL to use for API calls."""
     if ws and ws.server_url:
         return ws.server_url.rstrip("/")
     return _LOCAL_SERVER
+
+
+# ── OpenAI chat proxied through Engram server ─────────────────────────
+
+
+def _commit_user_message(ws: Any, message: str) -> None:
+    """Commit the user's typed message as an Engram fact."""
+    base = _server_url(ws)
+    _http_post(
+        f"{base}/api/commit",
+        {
+            "content": message,
+            "agent_id": "tui-user",
+            "scope": "tui",
+            "fact_type": "observation",
+        },
+        timeout=8,
+    )
+
+
+def _openai_chat(ws: Any, message: str, output_lines: list[tuple[str, str]]) -> None:
+    """Send message to the server /api/chat endpoint (server holds the API key)."""
+    base = _server_url(ws)
+    output_lines.append(("class:output.dim", "  Thinking...\n"))
+
+    status, data = _http_post(
+        f"{base}/api/chat",
+        {"message": message},
+        timeout=35,
+    )
+
+    if status == 0:
+        output_lines.append(("class:output.error", f"  Server unreachable: {data.get('error')}\n"))
+        return
+
+    if status == 503:
+        output_lines.append(("class:output.error", "  AI chat is not configured on this server.\n"))
+        return
+
+    if status != 200:
+        err = data.get("error", f"HTTP {status}")
+        output_lines.append(("class:output.error", f"  Error: {err}\n"))
+        return
+
+    reply = data.get("reply", "")
+    output_lines.append(("class:output.dim", "\n"))
+    for line in reply.splitlines():
+        output_lines.append(("class:output.ai", f"  {line}\n"))
+    output_lines.append(("class:output.dim", "\n"))
 
 
 # ── conflict display helpers ──────────────────────────────────────────
@@ -132,7 +186,7 @@ def _format_conflicts(conflicts: list[dict[str, Any]]) -> list[tuple[str, str]]:
     """Render a numbered conflict list for the TUI output area."""
     lines: list[tuple[str, str]] = []
     if not conflicts:
-        lines.append(("class:output.dim", "  ✓ No open conflicts — agents are aligned.\n"))
+        lines.append(("class:output.dim", "  ✓ No conflicts found.\n"))
         return lines
 
     lines.append(
@@ -145,7 +199,6 @@ def _format_conflicts(conflicts: list[dict[str, Any]]) -> list[tuple[str, str]]:
         severity = c.get("severity", "medium")
         sev_style = _SEV_COLOURS.get(severity, "class:output")
 
-        # Normalise nested vs flat fact shapes
         fa = c.get("fact_a") or {}
         fb = c.get("fact_b") or {}
         fa_content = (fa.get("content") or c.get("fact_a_content") or "")[:90]
@@ -163,7 +216,7 @@ def _format_conflicts(conflicts: list[dict[str, Any]]) -> list[tuple[str, str]]:
         if fb_content:
             scope_tag = f" ({fb_scope})" if fb_scope else ""
             lines.append(("class:output.dim", f"      B{scope_tag}: {fb_content}\n"))
-        lines.append(("class:output.dim", f"      resolve {short} keep_a|keep_b|dismiss\n\n"))
+        lines.append(("class:output.dim", "\n"))
 
     lines.append(("class:output.dim", "  Changes sync instantly with the web dashboard.\n"))
     return lines
@@ -178,7 +231,6 @@ def _load_conflicts(ws: Any, output_lines: list[tuple[str, str]]) -> None:
     data = _http_get(f"{base}/api/conflicts?status=open")
 
     if data is None:
-        # Server not running — fall back to CLI subprocess
         output_lines.append(("class:output.dim", "  (server offline — using local engine)\n"))
         _run_engram_command("conflicts", "", output_lines)
         return
@@ -195,7 +247,6 @@ def _resolve_conflict(
     """Resolve a conflict via the server API and report the result."""
     base = _server_url(ws)
 
-    # Map short aliases to canonical resolution types
     _aliases = {
         "keep_a": "winner",
         "keep_b": "winner",
@@ -214,7 +265,6 @@ def _resolve_conflict(
         )
         return
 
-    # For keep_a/keep_b we need the actual fact IDs — fetch the conflict first
     winning_claim_id: str | None = None
     if resolution_type.lower() in ("keep_a", "keep_b"):
         data = _http_get(f"{base}/api/conflicts?status=open")
@@ -228,7 +278,7 @@ def _resolve_conflict(
                     else:
                         fb = c.get("fact_b") or {}
                         winning_claim_id = fb.get("fact_id") or fb.get("id") or c.get("fact_b_id")
-                    conflict_id = cid  # use full ID for the resolve call
+                    conflict_id = cid
                     break
 
     note = f"Resolved via TUI ({resolution_type})"
@@ -243,7 +293,6 @@ def _resolve_conflict(
     status, result = _http_post(f"{base}/api/resolve", payload)
 
     if status == 0:
-        # Server offline — fall back to CLI
         output_lines.append(("class:output.dim", "  (server offline — using local engine)\n"))
         _run_engram_command("resolve", f"{conflict_id} {resolution_type_norm} {note}", output_lines)
         return
@@ -257,6 +306,19 @@ def _resolve_conflict(
         ("class:output.label", f"  ✓ Conflict {conflict_id[:8]} resolved ({resolution_type}).\n")
     )
     output_lines.append(("class:output.dim", "  Dashboard will reflect this immediately.\n"))
+
+
+# ── merge (join another workspace) ────────────────────────────────────
+
+
+def _handle_merge_invite_key(invite_key: str, output_lines: list[tuple[str, str]]) -> None:
+    """Run `engram join <invite_key>` to merge with another person's memory space."""
+    if not invite_key.strip():
+        output_lines.append(("class:output.error", "  No invite key provided. Merge cancelled.\n"))
+        return
+
+    output_lines.append(("class:output.dim", "  Joining workspace...\n"))
+    _run_engram_command("join", invite_key.strip(), output_lines)
 
 
 def run_tui(ws: Any, ctx: Any) -> None:
@@ -331,12 +393,22 @@ def run_tui(ws: Any, ctx: Any) -> None:
         return Point(x=0, y=max(0, total - 1))
 
     def toolbar_text() -> AnyFormattedText:
+        if state.get("waiting_for_invite_key"):
+            return [
+                ("class:toolbar", "  "),
+                ("class:toolbar.key", "Paste invite key and press Enter"),
+                ("class:toolbar.sep", "   ·   "),
+                ("class:toolbar.key", "Ctrl+C"),
+                ("class:toolbar", " cancel"),
+                ("class:toolbar", "  "),
+            ]
         return [
             ("class:toolbar", "  "),
             ("class:toolbar.key", "conflicts"),
             ("class:toolbar", " refresh"),
             ("class:toolbar.sep", "   ·   "),
-            ("class:toolbar.key", "resolve <id> keep_a|keep_b|dismiss"),
+            ("class:toolbar.key", "merge"),
+            ("class:toolbar", " join another memory space"),
             ("class:toolbar.sep", "   ·   "),
             ("class:toolbar.key", "?"),
             ("class:toolbar", " help"),
@@ -360,6 +432,14 @@ def run_tui(ws: Any, ctx: Any) -> None:
         if not text:
             return
 
+        # Handle invite key input for merge flow
+        if state.get("waiting_for_invite_key"):
+            state.pop("waiting_for_invite_key")
+            output_lines.append(("class:output.cmd", "\n  > [invite key entered]\n"))
+            _handle_merge_invite_key(text, output_lines)
+            app.invalidate()
+            return
+
         output_lines.append(("class:output.cmd", f"\n  > {text}\n"))
         parts = text.split(None, 2)
         cmd = parts[0].lower()
@@ -375,10 +455,20 @@ def run_tui(ws: Any, ctx: Any) -> None:
         if cmd == "clear":
             output_lines.clear()
             return
-        if cmd not in _VALID_COMMANDS:
+
+        # Auto-commit every message as an Engram fact (in background)
+        import threading
+        threading.Thread(
+            target=_commit_user_message, args=(ws, text), daemon=True
+        ).start()
+
+        if cmd == "merge":
             output_lines.append(
-                ("class:output.error", f"  Unknown command: {cmd}. Type ? for help.\n")
+                ("class:output.label", "  engram merge — join another memory space\n\n")
             )
+            output_lines.append(("class:output", "  Enter the invite key from the other workspace:\n"))
+            state["waiting_for_invite_key"] = True
+            app.invalidate()
             return
 
         if cmd == "conflicts":
@@ -391,13 +481,15 @@ def run_tui(ws: Any, ctx: Any) -> None:
             else:
                 resolution = extra or "dismissed"
                 _resolve_conflict(ws, arg, resolution, output_lines)
-                # Auto-refresh conflicts after resolving
                 output_lines.append(("class:output.dim", "\n"))
                 _load_conflicts(ws, output_lines)
         elif cmd == "search" and not arg:
             output_lines.append(("class:output.error", "  Usage: search <query>\n"))
-        else:
+        elif cmd in _VALID_COMMANDS:
             _run_engram_command(cmd, arg + (" " + extra if extra else ""), output_lines)
+        else:
+            # Unknown command → treat as free-text chat with OpenAI + fact corpus
+            _openai_chat(ws, text, output_lines)
 
         app.invalidate()
 
@@ -412,7 +504,12 @@ def run_tui(ws: Any, ctx: Any) -> None:
     @kb.add("c-c")
     @kb.add("c-d")
     def _exit(event: Any) -> None:
-        event.app.exit()
+        if state.get("waiting_for_invite_key"):
+            state.pop("waiting_for_invite_key")
+            output_lines.append(("class:output.dim", "  Merge cancelled.\n"))
+            event.app.invalidate()
+        else:
+            event.app.exit()
 
     @kb.add("c-l")
     def _clear(event: Any) -> None:
@@ -426,14 +523,6 @@ def run_tui(ws: Any, ctx: Any) -> None:
         event.app.invalidate()
 
     # ── layout ────────────────────────────────────────────────────────────
-    #
-    # Order (top → bottom):
-    #   Header      (fixed 4 lines)
-    #   Separator   (fixed 1 line)
-    #   Output area (flexible — conflicts on startup, fills with output)
-    #   Separator   (fixed 1 line)
-    #   Input bar   (fixed 1 line)
-    #   Toolbar     (fixed 1 line)
 
     layout = Layout(
         HSplit(
