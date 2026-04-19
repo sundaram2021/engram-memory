@@ -2076,10 +2076,17 @@ async function resolveConflict(conflictId, answer) {
       const resolved = WS_DATA.conflicts.find(x => x.id === conflictId);
       if (resolved) {
         const pairKey = [resolved.fact_a_id, resolved.fact_b_id].sort().join('|');
-        WS_DATA.conflicts.forEach(x => {
-          const k = [x.fact_a_id, x.fact_b_id].sort().join('|');
-          if (k === pairKey) { x.status = 'resolved'; x.resolution_type = resolution_type; }
-        });
+        if (resolution_type === 'dismissed') {
+          WS_DATA.conflicts = WS_DATA.conflicts.filter(x => {
+            const k = [x.fact_a_id, x.fact_b_id].sort().join('|');
+            return k !== pairKey;
+          });
+        } else {
+          WS_DATA.conflicts.forEach(x => {
+            const k = [x.fact_a_id, x.fact_b_id].sort().join('|');
+            if (k === pairKey) { x.status = 'resolved'; x.resolution_type = resolution_type; }
+          });
+        }
       }
     }
     renderConflicts();

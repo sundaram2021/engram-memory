@@ -95,3 +95,41 @@ def test_commit_check_handles_query_failure(monkeypatch):
 
     assert result.exit_code == 0
     assert "Engram commit check skipped" in result.output
+
+
+def test_pre_commit_hook_allows_clean_workspace(monkeypatch):
+    monkeypatch.setattr(
+        "engram.commit_check.load_project_credentials",
+        lambda cwd=None: ("http://127.0.0.1:7474", "ek_live_test"),
+    )
+    monkeypatch.setattr("engram.commit_check.fetch_open_conflicts", lambda *args, **kwargs: [])
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["pre-commit-hook"])
+
+    assert result.exit_code == 0
+    assert "no unresolved conflicts" in result.output.lower()
+
+
+def test_pre_commit_hook_blocks_when_conflicts_exist(monkeypatch):
+    monkeypatch.setattr(
+        "engram.commit_check.load_project_credentials",
+        lambda cwd=None: ("http://127.0.0.1:7474", "ek_live_test"),
+    )
+    monkeypatch.setattr(
+        "engram.commit_check.fetch_open_conflicts",
+        lambda *args, **kwargs: [
+            {
+                "conflict_id": "conflict-1",
+                "explanation": "Rate limit disagreement",
+                "fact_a": {"scope": "auth", "content": "Limit is 1000 req/s"},
+                "fact_b": {"scope": "auth", "content": "Limit is 2000 req/s"},
+            }
+        ],
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["pre-commit-hook"])
+
+    assert result.exit_code == 1
+    assert "Rate limit disagreement" in result.output

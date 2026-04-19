@@ -20,7 +20,7 @@ Two schemas are maintained:
 - POSTGRES_SCHEMA_SQL: PostgreSQL (team mode, asyncpg)
 """
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 # Incremental ALTER TABLE migrations keyed by target version.
 MIGRATIONS: dict[int, list[str]] = {
@@ -201,6 +201,14 @@ MIGRATIONS: dict[int, list[str]] = {
             CASE WHEN fact_a_id < fact_b_id THEN fact_b_id ELSE fact_a_id END
         )""",
     ],
+    16: [
+        """CREATE TABLE IF NOT EXISTS dismissed_conflicts (
+            conflict_id    TEXT PRIMARY KEY,
+            workspace_id   TEXT NOT NULL DEFAULT 'local',
+            dismissed_at   TEXT NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_dismissed_conflicts_workspace ON dismissed_conflicts(workspace_id)",
+    ],
 }
 
 # ── SQLite schema (local mode) ───────────────────────────────────────
@@ -318,6 +326,17 @@ CREATE TABLE IF NOT EXISTS conflicts (
 CREATE INDEX IF NOT EXISTS idx_conflicts_status    ON conflicts(status);
 CREATE INDEX IF NOT EXISTS idx_conflicts_fact_a    ON conflicts(fact_a_id);
 CREATE INDEX IF NOT EXISTS idx_conflicts_fact_b    ON conflicts(fact_b_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conflicts_pair_unique ON conflicts(
+    workspace_id,
+    CASE WHEN fact_a_id < fact_b_id THEN fact_a_id ELSE fact_b_id END,
+    CASE WHEN fact_a_id < fact_b_id THEN fact_b_id ELSE fact_a_id END
+);
+
+CREATE TABLE IF NOT EXISTS dismissed_conflicts (
+    conflict_id                  TEXT PRIMARY KEY REFERENCES conflicts(id),
+    workspace_id                 TEXT NOT NULL DEFAULT 'local',
+    dismissed_at                 TEXT NOT NULL
+);
 
 -- Agent registry
 CREATE TABLE IF NOT EXISTS agents (
@@ -501,6 +520,8 @@ POST_MIGRATION_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_facts_workspace    ON facts(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_facts_durability   ON facts(durability, valid_until);
 CREATE INDEX IF NOT EXISTS idx_conflicts_workspace ON conflicts(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_dismissed_conflicts_workspace
+ON dismissed_conflicts(workspace_id);
 """
 
 # ── PostgreSQL schema (team mode) ────────────────────────────────────
@@ -598,6 +619,18 @@ CREATE INDEX IF NOT EXISTS idx_conflicts_status    ON conflicts(status);
 CREATE INDEX IF NOT EXISTS idx_conflicts_fact_a    ON conflicts(fact_a_id);
 CREATE INDEX IF NOT EXISTS idx_conflicts_fact_b    ON conflicts(fact_b_id);
 CREATE INDEX IF NOT EXISTS idx_conflicts_workspace ON conflicts(workspace_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_conflicts_pair_unique ON conflicts(
+    workspace_id,
+    LEAST(fact_a_id, fact_b_id),
+    GREATEST(fact_a_id, fact_b_id)
+);
+
+CREATE TABLE IF NOT EXISTS dismissed_conflicts (
+    conflict_id                  TEXT PRIMARY KEY REFERENCES conflicts(id),
+    workspace_id                 TEXT NOT NULL DEFAULT 'local',
+    dismissed_at                 TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dismissed_conflicts_workspace ON dismissed_conflicts(workspace_id);
 
 -- Agent registry
 CREATE TABLE IF NOT EXISTS agents (

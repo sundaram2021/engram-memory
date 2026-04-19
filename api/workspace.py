@@ -98,6 +98,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_conflicts_pair_unique ON conflicts(
     workspace_id, LEAST(fact_a_id, fact_b_id), GREATEST(fact_a_id, fact_b_id)
 );
 
+CREATE TABLE IF NOT EXISTS dismissed_conflicts (
+    conflict_id TEXT PRIMARY KEY REFERENCES conflicts(id),
+    workspace_id TEXT NOT NULL,
+    dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dismissed_conflicts_workspace
+    ON dismissed_conflicts(workspace_id);
+
 CREATE TABLE IF NOT EXISTS agents (
     agent_id TEXT NOT NULL,
     workspace_id TEXT NOT NULL,
@@ -253,6 +261,11 @@ async def handle_search(request: Request) -> JSONResponse:
                 f"""SELECT id, fact_a_id, fact_b_id, explanation, severity, status, detected_at
                    FROM {SCHEMA}.conflicts
                    WHERE workspace_id = $1
+                     AND NOT EXISTS (
+                         SELECT 1 FROM {SCHEMA}.dismissed_conflicts dc
+                         WHERE dc.conflict_id = {SCHEMA}.conflicts.id
+                           AND dc.workspace_id = {SCHEMA}.conflicts.workspace_id
+                     )
                    ORDER BY detected_at DESC
                    LIMIT 200""",
                 engram_id,
@@ -392,6 +405,11 @@ async def handle_session_search(request: Request) -> JSONResponse:
                 f"""SELECT id, fact_a_id, fact_b_id, explanation, severity, status, detected_at
                    FROM {SCHEMA}.conflicts
                    WHERE workspace_id = $1
+                     AND NOT EXISTS (
+                         SELECT 1 FROM {SCHEMA}.dismissed_conflicts dc
+                         WHERE dc.conflict_id = {SCHEMA}.conflicts.id
+                           AND dc.workspace_id = {SCHEMA}.conflicts.workspace_id
+                     )
                    ORDER BY detected_at DESC
                    LIMIT 200""",
                 engram_id,
