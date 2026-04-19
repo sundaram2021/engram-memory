@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import http.client
+import json
 import os
 import subprocess
 import sys
+import urllib.parse
 from typing import Any
 
 from prompt_toolkit import Application
@@ -37,6 +40,8 @@ _STYLE = Style.from_dict(
         "output.cmd": "bold noinherit #00dd55",
         "output.error": "noinherit #ff5555",
         "output.dim": "noinherit #555555",
+        "output.warn": "noinherit #ffaa00",
+        "output.label": "bold noinherit #00dd55",
         "toolbar": "noinherit bg:#111111 #444444",
         "toolbar.key": "noinherit bg:#111111 #00dd55",
         "toolbar.sep": "noinherit bg:#111111 #333333",
@@ -59,12 +64,199 @@ _VALID_COMMANDS = {
 _HELP_LINES: list[tuple[str, str]] = [
     ("class:output.dim", "\n"),
     ("class:output", "  Commands:\n"),
-    ("class:output", "    resolve <id> <resolution>  — resolve a conflict\n"),
-    ("class:output", "    conflicts                  — refresh conflicts\n"),
-    ("class:output", "    clear                      — clear output  (Ctrl+L)\n"),
-    ("class:output", "    quit / q                   — exit          (Ctrl+C)\n"),
+    ("class:output", "    conflicts                           — refresh conflict list\n"),
+    ("class:output", "    resolve <id> keep_a|keep_b|dismiss  — resolve a conflict\n"),
+    ("class:output", "    clear                               — clear output  (Ctrl+L)\n"),
+    ("class:output", "    quit / q                            — exit          (Ctrl+C)\n"),
+    ("class:output.dim", "\n"),
+    ("class:output.dim", "  Conflicts are shared with the web dashboard in real time.\n"),
     ("class:output.dim", "\n"),
 ]
+
+# Default local server address — matches `engram serve --http`
+_LOCAL_SERVER = "http://localhost:7474"
+
+
+# ── server API helpers ────────────────────────────────────────────────
+
+
+def _http_get(url: str, timeout: int = 5) -> Any | None:
+    """GET url, return parsed JSON or None on any error."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        conn = http.client.HTTPConnection(
+            parsed.hostname or "localhost", parsed.port or 80, timeout=timeout
+        )
+        conn.request("GET", parsed.path + (f"?{parsed.query}" if parsed.query else ""))
+        resp = conn.getresponse()
+        if resp.status == 200:
+            return json.loads(resp.read())
+    except Exception:
+        pass
+    return None
+
+
+def _http_post(url: str, body: dict[str, Any], timeout: int = 5) -> tuple[int, Any]:
+    """POST JSON body to url, return (status_code, parsed_json)."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        raw = json.dumps(body).encode()
+        conn = http.client.HTTPConnection(
+            parsed.hostname or "localhost", parsed.port or 80, timeout=timeout
+        )
+        conn.request(
+            "POST",
+            parsed.path,
+            raw,
+            {"Content-Type": "application/json", "Content-Length": str(len(raw))},
+        )
+        resp = conn.getresponse()
+        return resp.status, json.loads(resp.read())
+    except Exception as exc:
+        return 0, {"error": str(exc)}
+
+
+def _server_url(ws: Any) -> str:
+    """Return the server base URL to use for API calls."""
+    if ws and ws.server_url:
+        return ws.server_url.rstrip("/")
+    return _LOCAL_SERVER
+
+
+# ── conflict display helpers ──────────────────────────────────────────
+
+_SEV_COLOURS = {"high": "class:output.error", "medium": "class:output.warn", "low": "class:output"}
+
+
+def _format_conflicts(conflicts: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Render a numbered conflict list for the TUI output area."""
+    lines: list[tuple[str, str]] = []
+    if not conflicts:
+        lines.append(("class:output.dim", "  ✓ No open conflicts — agents are aligned.\n"))
+        return lines
+
+    lines.append(
+        ("class:output", f"  {len(conflicts)} open conflict(s) — shared with dashboard:\n\n")
+    )
+    for i, c in enumerate(conflicts, 1):
+        cid = (c.get("conflict_id") or c.get("id") or "")[:16]
+        short = cid[:8]
+        explanation = c.get("explanation") or "Conflicting information detected"
+        severity = c.get("severity", "medium")
+        sev_style = _SEV_COLOURS.get(severity, "class:output")
+
+        # Normalise nested vs flat fact shapes
+        fa = c.get("fact_a") or {}
+        fb = c.get("fact_b") or {}
+        fa_content = (fa.get("content") or c.get("fact_a_content") or "")[:90]
+        fb_content = (fb.get("content") or c.get("fact_b_content") or "")[:90]
+        fa_scope = fa.get("scope") or c.get("fact_a_scope") or ""
+        fb_scope = fb.get("scope") or c.get("fact_b_scope") or ""
+
+        lines.append(("class:output.label", f"  [{i}] "))
+        lines.append((sev_style, f"[{severity}] "))
+        lines.append(("class:output.dim", f"id:{short}\n"))
+        lines.append(("class:output", f"      {explanation}\n"))
+        if fa_content:
+            scope_tag = f" ({fa_scope})" if fa_scope else ""
+            lines.append(("class:output.dim", f"      A{scope_tag}: {fa_content}\n"))
+        if fb_content:
+            scope_tag = f" ({fb_scope})" if fb_scope else ""
+            lines.append(("class:output.dim", f"      B{scope_tag}: {fb_content}\n"))
+        lines.append(("class:output.dim", f"      resolve {short} keep_a|keep_b|dismiss\n\n"))
+
+    lines.append(("class:output.dim", "  Changes sync instantly with the web dashboard.\n"))
+    return lines
+
+
+# ── conflict fetch / resolve via server ───────────────────────────────
+
+
+def _load_conflicts(ws: Any, output_lines: list[tuple[str, str]]) -> None:
+    """Fetch open conflicts from the server and append formatted output."""
+    base = _server_url(ws)
+    data = _http_get(f"{base}/api/conflicts?status=open")
+
+    if data is None:
+        # Server not running — fall back to CLI subprocess
+        output_lines.append(("class:output.dim", "  (server offline — using local engine)\n"))
+        _run_engram_command("conflicts", "", output_lines)
+        return
+
+    output_lines.extend(_format_conflicts(data if isinstance(data, list) else []))
+
+
+def _resolve_conflict(
+    ws: Any,
+    conflict_id: str,
+    resolution_type: str,
+    output_lines: list[tuple[str, str]],
+) -> None:
+    """Resolve a conflict via the server API and report the result."""
+    base = _server_url(ws)
+
+    # Map short aliases to canonical resolution types
+    _aliases = {
+        "keep_a": "winner",
+        "keep_b": "winner",
+        "dismiss": "dismissed",
+        "dismissed": "dismissed",
+        "winner": "winner",
+        "merge": "merge",
+    }
+    resolution_type_norm = _aliases.get(resolution_type.lower(), resolution_type.lower())
+    if resolution_type_norm not in ("winner", "merge", "dismissed"):
+        output_lines.append(
+            (
+                "class:output.error",
+                f"  Unknown resolution '{resolution_type}'. Use keep_a, keep_b, or dismiss.\n",
+            )
+        )
+        return
+
+    # For keep_a/keep_b we need the actual fact IDs — fetch the conflict first
+    winning_claim_id: str | None = None
+    if resolution_type.lower() in ("keep_a", "keep_b"):
+        data = _http_get(f"{base}/api/conflicts?status=open")
+        if isinstance(data, list):
+            for c in data:
+                cid = c.get("conflict_id") or c.get("id") or ""
+                if cid.startswith(conflict_id):
+                    if resolution_type.lower() == "keep_a":
+                        fa = c.get("fact_a") or {}
+                        winning_claim_id = fa.get("fact_id") or fa.get("id") or c.get("fact_a_id")
+                    else:
+                        fb = c.get("fact_b") or {}
+                        winning_claim_id = fb.get("fact_id") or fb.get("id") or c.get("fact_b_id")
+                    conflict_id = cid  # use full ID for the resolve call
+                    break
+
+    note = f"Resolved via TUI ({resolution_type})"
+    payload: dict[str, Any] = {
+        "conflict_id": conflict_id,
+        "resolution_type": resolution_type_norm,
+        "resolution": note,
+    }
+    if winning_claim_id:
+        payload["winning_claim_id"] = winning_claim_id
+
+    status, result = _http_post(f"{base}/api/resolve", payload)
+
+    if status == 0:
+        # Server offline — fall back to CLI
+        output_lines.append(("class:output.dim", "  (server offline — using local engine)\n"))
+        _run_engram_command("resolve", f"{conflict_id} {resolution_type_norm} {note}", output_lines)
+        return
+
+    if status != 200:
+        err = result.get("error") or result.get("detail") or f"HTTP {status}"
+        output_lines.append(("class:output.error", f"  Resolve failed: {err}\n"))
+        return
+
+    output_lines.append(
+        ("class:output.label", f"  ✓ Conflict {conflict_id[:8]} resolved ({resolution_type}).\n")
+    )
+    output_lines.append(("class:output.dim", "  Dashboard will reflect this immediately.\n"))
 
 
 def run_tui(ws: Any, ctx: Any) -> None:
@@ -140,9 +332,11 @@ def run_tui(ws: Any, ctx: Any) -> None:
 
     def toolbar_text() -> AnyFormattedText:
         return [
-            ("class:toolbar", "  type "),
-            ("class:toolbar.key", "resolve <id> <resolution>"),
-            ("class:toolbar", " to settle a conflict"),
+            ("class:toolbar", "  "),
+            ("class:toolbar.key", "conflicts"),
+            ("class:toolbar", " refresh"),
+            ("class:toolbar.sep", "   ·   "),
+            ("class:toolbar.key", "resolve <id> keep_a|keep_b|dismiss"),
             ("class:toolbar.sep", "   ·   "),
             ("class:toolbar.key", "?"),
             ("class:toolbar", " help"),
@@ -167,9 +361,10 @@ def run_tui(ws: Any, ctx: Any) -> None:
             return
 
         output_lines.append(("class:output.cmd", f"\n  > {text}\n"))
-        parts = text.split(None, 1)
+        parts = text.split(None, 2)
         cmd = parts[0].lower()
         arg = parts[1] if len(parts) > 1 else ""
+        extra = parts[2] if len(parts) > 2 else ""
 
         if cmd in ("quit", "exit", "q"):
             app.exit()
@@ -186,11 +381,25 @@ def run_tui(ws: Any, ctx: Any) -> None:
             )
             return
 
-        if cmd == "search" and not arg:
+        if cmd == "conflicts":
+            _load_conflicts(ws, output_lines)
+        elif cmd == "resolve":
+            if not arg:
+                output_lines.append(
+                    ("class:output.error", "  Usage: resolve <id> keep_a|keep_b|dismiss\n")
+                )
+            else:
+                resolution = extra or "dismissed"
+                _resolve_conflict(ws, arg, resolution, output_lines)
+                # Auto-refresh conflicts after resolving
+                output_lines.append(("class:output.dim", "\n"))
+                _load_conflicts(ws, output_lines)
+        elif cmd == "search" and not arg:
             output_lines.append(("class:output.error", "  Usage: search <query>\n"))
-            return
+        else:
+            _run_engram_command(cmd, arg + (" " + extra if extra else ""), output_lines)
 
-        _run_engram_command(cmd, arg, output_lines)
+        app.invalidate()
 
     kb = KeyBindings()
 
@@ -208,6 +417,12 @@ def run_tui(ws: Any, ctx: Any) -> None:
     @kb.add("c-l")
     def _clear(event: Any) -> None:
         output_lines.clear()
+        event.app.invalidate()
+
+    @kb.add("c-r")
+    def _refresh(event: Any) -> None:
+        output_lines.append(("class:output.cmd", "\n  > conflicts\n"))
+        _load_conflicts(ws, output_lines)
         event.app.invalidate()
 
     # ── layout ────────────────────────────────────────────────────────────
@@ -291,7 +506,7 @@ def run_tui(ws: Any, ctx: Any) -> None:
     threading.Thread(target=_blink, daemon=True).start()
 
     # Load conflicts immediately on startup
-    _run_engram_command("conflicts", "", output_lines)
+    _load_conflicts(ws, output_lines)
 
     app.run()
 
