@@ -123,13 +123,6 @@ Conflicts are surfaced automatically. You choose how to resolve them.
 engram
 ```
 
-This opens the Engram interactive shell directly in your terminal, showing your open conflicts immediately. Type a command to resolve:
-
-- `resolve <id> winner` — mark one fact as authoritative and retire the other
-- `resolve <id> merge` — synthesize both into a single revised fact
-- `resolve <id> dismiss` — mark as a known ambiguity that doesn't require resolution
-
-No browser required. No context switching. The conflict is resolved in your workspace and propagated to every agent instantly.
 
 **Option 2 — Web dashboard**
 
