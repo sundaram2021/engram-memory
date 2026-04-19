@@ -18,9 +18,9 @@ Every agent sees the same verified facts. When agents contradict each other, Eng
 
 Your brain never turns off — even when you're asleep, it's consolidating memory, surfacing patterns, preparing for what comes next. Your agents don't work that way. They lose everything the moment a session ends.
 
-Engram changes that. Every agent's messages are committed to active memory as verified facts — and Engram keeps working between sessions, constantly scanning the codebase and surfacing contradictions before any agent acts on stale information. The longer it runs, the more it knows. Every hour of inference time compounds.
+Engram changes that. Every agent's messages are committed to active memory as verified facts — and Engram keeps working while you sleep, reading through your codebase, learning what changed, and surfacing contradictions before any agent acts on stale information. The longer it runs, the more it knows.
 
-You can also add team members. Every agent on the workspace sees the same memory.
+You can add team members and every agent on the workspace shares the same memory. Active hours are tiered by plan — see the [pricing page](https://engram-memory.com/dashboard) in your dashboard.
 
 ## Why It Matters
 
@@ -182,19 +182,6 @@ engram stats            # Privacy-preserving workspace analytics
 engram import <path>    # Bulk-ingest Markdown/text docs
 engram serve --http     # Run the MCP server locally (port 7474)
 ```
-
----
-
-## Plans
-
-Engram's active memory runs on a credit model — the more hours it scans, the more it learns. Plans are in preview.
-
-| Plan | Active hours/day | What you get |
-|------|-----------------|------|
-| **Free** | 1 hr | On-demand conflict check, basic memory capture |
-| **Builder** | 2 hrs | Nightly scan, morning briefing, basic conflict detection |
-| **Team** | 8 hrs | Real-time file watching during work hours, faster drift detection |
-| **Scale** | 24 hrs | Always-on across the whole org, cross-agent learning, instant conflict surfacing |
 
 ---
 
