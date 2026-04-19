@@ -778,6 +778,63 @@ async def handle_rename_workspace(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok", "engram_id": engram_id, "display_name": display_name})
 
 
+async def handle_leave_workspace(request: Request) -> JSONResponse:
+    """Remove the logged-in user from a workspace. POST {engram_id}.
+    If the user is the last member, the workspace and all its data are deleted.
+    """
+    session = _get_jwt_from_request(request)
+    if not session:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    engram_id = (body.get("engram_id") or "").strip()
+    if not engram_id:
+        return JSONResponse({"error": "engram_id is required"}, status_code=400)
+
+    try:
+        pool = await _get_pool()
+        async with pool.acquire() as conn:
+            owns = await conn.fetchrow(
+                f"SELECT 1 FROM {SCHEMA}.user_workspaces WHERE user_id = $1 AND engram_id = $2",
+                session["sub"],
+                engram_id,
+            )
+            if not owns:
+                return JSONResponse(
+                    {"error": "Workspace not found or access denied"}, status_code=403
+                )
+
+            await conn.execute(
+                f"DELETE FROM {SCHEMA}.user_workspaces WHERE user_id = $1 AND engram_id = $2",
+                session["sub"],
+                engram_id,
+            )
+
+            remaining = await conn.fetchval(
+                f"SELECT COUNT(*) FROM {SCHEMA}.user_workspaces WHERE engram_id = $1",
+                engram_id,
+            )
+            if remaining == 0:
+                for table in ("facts", "conflicts"):
+                    await conn.execute(
+                        f"DELETE FROM {SCHEMA}.{table} WHERE workspace_id = $1", engram_id
+                    )
+                await conn.execute(
+                    f"DELETE FROM {SCHEMA}.workspace_keys WHERE engram_id = $1", engram_id
+                )
+                await conn.execute(
+                    f"DELETE FROM {SCHEMA}.workspaces WHERE engram_id = $1", engram_id
+                )
+    except Exception as exc:
+        return JSONResponse({"error": f"Database error: {exc}"}, status_code=500)
+
+    return JSONResponse({"status": "ok", "engram_id": engram_id})
+
+
 app = Starlette(
     routes=[
         Route("/auth/signup", handle_signup, methods=["POST"]),
@@ -788,6 +845,7 @@ app = Starlette(
         Route("/auth/create-workspace", handle_create_workspace, methods=["POST"]),
         Route("/auth/invite-key", handle_invite_key, methods=["POST"]),
         Route("/auth/rename-workspace", handle_rename_workspace, methods=["POST"]),
+        Route("/auth/leave-workspace", handle_leave_workspace, methods=["POST"]),
         Route("/auth/reset-invite-key", handle_reset_invite_key, methods=["POST"]),
         Route("/auth/{path:path}", handle_options, methods=["OPTIONS"]),
     ]

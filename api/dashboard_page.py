@@ -351,6 +351,10 @@ def _render_dashboard() -> str:
       background: rgba(52,211,153,0.07); border: 1px solid rgba(52,211,153,0.15); color: var(--em4);
       cursor: pointer; font-family: inherit; transition: background 0.2s; }
     .ws-key-btn:hover { background: rgba(52,211,153,0.14); }
+    .ws-delete-btn { padding: 5px 10px; border-radius: 7px; font-size: 12px; font-weight: 600;
+      background: rgba(239,68,68,0.07); border: 1px solid rgba(239,68,68,0.2); color: var(--red);
+      cursor: pointer; font-family: inherit; transition: background 0.2s; }
+    .ws-delete-btn:hover { background: rgba(239,68,68,0.15); }
 
     /* ── WORKSPACE DETAIL ───────────────────────────────────────── */
     #ws-detail-screen { display: none; }
@@ -846,6 +850,27 @@ def _render_dashboard() -> str:
   </div>
 </div>
 
+<!-- ── DELETE WORKSPACE MODAL ───────────────────────────────────── -->
+<div class="modal-overlay" id="delete-modal">
+  <div class="modal" style="max-width:400px;">
+    <h3 style="color:var(--red);">Delete workspace?</h3>
+    <p class="subtitle" id="delete-modal-subtitle" style="margin-bottom:16px;"></p>
+    <p style="font-size:13px;color:var(--tm);margin-bottom:20px;">
+      This removes it from your account. If you created this workspace and are the last member,
+      all facts and history will be permanently deleted.
+    </p>
+    <div id="delete-modal-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="ws-rename-btn" onclick="closeDeleteModal()">Cancel</button>
+      <button onclick="confirmDelete()"
+        style="padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;font-family:inherit;
+               background:var(--red);color:#fff;border:none;cursor:pointer;">
+        Delete
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ── CONNECT WORKSPACE MODAL ──────────────────────────────────── -->
 <div class="modal-overlay" id="connect-modal">
   <div class="modal">
@@ -1134,10 +1159,48 @@ function renderWsGrid(workspaces) {
         <button class="ws-rename-btn" onclick="event.stopPropagation();openWorkspaceAndRename('${wsId}')">
           ${wsName ? 'Rename' : '+ Name this workspace'}
         </button>
-        <button class="ws-key-btn" onclick="event.stopPropagation();openKeyModal('${wsId}')">View invite key</button>
+        <div style="display:flex;gap:6px;">
+          <button class="ws-key-btn" onclick="event.stopPropagation();openKeyModal('${wsId}')">View invite key</button>
+          <button class="ws-delete-btn" onclick="event.stopPropagation();openDeleteModal('${wsId}', '${wsName || wsId}')">Delete</button>
+        </div>
       </div>
     </div>`;
   }).join('');
+}
+
+// ── Delete workspace modal ──────────────────────────────────────────
+let _deleteWsId = null;
+function openDeleteModal(wsId, wsLabel) {
+  _deleteWsId = wsId;
+  document.getElementById('delete-modal-subtitle').textContent =
+    `Are you sure you want to delete "${wsLabel}"?`;
+  document.getElementById('delete-modal-error').style.display = 'none';
+  document.getElementById('delete-modal').classList.add('open');
+}
+function closeDeleteModal() {
+  _deleteWsId = null;
+  document.getElementById('delete-modal').classList.remove('open');
+}
+async function confirmDelete() {
+  if (!_deleteWsId) return;
+  const errEl = document.getElementById('delete-modal-error');
+  errEl.style.display = 'none';
+  try {
+    const r = await fetch('/auth/leave-workspace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ engram_id: _deleteWsId }),
+    });
+    const d = await r.json();
+    if (!r.ok) { errEl.textContent = d.error || 'Delete failed.'; errEl.style.display = 'block'; return; }
+    closeDeleteModal();
+    SESSION.workspaces = (SESSION.workspaces || []).filter(w => w.engram_id !== _deleteWsId);
+    renderWsGrid(SESSION.workspaces);
+  } catch(e) {
+    errEl.textContent = 'Connection error — please try again.';
+    errEl.style.display = 'block';
+  }
 }
 
 // ── Connect workspace modal ─────────────────────────────────────────
