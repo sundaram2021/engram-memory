@@ -52,16 +52,14 @@ async def _auth_workspace(request: Request) -> str | None:
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer ek_live_"):
         return None
-    invite_key = auth[len("Bearer "):]
+    invite_key = auth[len("Bearer ") :]
     try:
         key_hash = _invite_key_hash(invite_key)
     except Exception:
         return None
     pool = await _get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT engram_id FROM invite_keys WHERE key_hash = $1", key_hash
-        )
+        row = await conn.fetchrow("SELECT engram_id FROM invite_keys WHERE key_hash = $1", key_hash)
     return row["engram_id"] if row else None
 
 
