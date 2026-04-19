@@ -52,6 +52,7 @@ class BaseStorage(ABC):
         fact_type: str | None = None,
         as_of: str | None = None,
         limit: int = 200,
+        offset: int = 0,
         include_ephemeral: bool = False,
     ) -> list[dict]: ...
 

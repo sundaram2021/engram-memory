@@ -116,27 +116,47 @@ class PostgresStorage(BaseStorage):
             "workspace_id",
             "durability",
         ]
-        placeholders = ", ".join(f"${i + 1}" for i in range(len(cols)))
         col_names = ", ".join(cols)
 
-        # entities must be a JSON string for asyncpg to handle as jsonb
+        # Build placeholders; the `embedding` column uses an explicit ::text::vector
+        # cast so asyncpg treats it as a plain string without needing a type codec.
+        placeholder_parts = []
+        for i, c in enumerate(cols):
+            if c == "embedding":
+                placeholder_parts.append(f"${i + 1}::text::vector")
+            else:
+                placeholder_parts.append(f"${i + 1}")
+        placeholders = ", ".join(placeholder_parts)
+
         values = []
         for c in cols:
             v = fact.get(c)
             if c == "workspace_id" and v is None:
                 v = self.workspace_id
-            if c == "entities" and isinstance(v, str):
-                # Already a JSON string — asyncpg needs the raw value for jsonb
+            if c == "entities":
+                # asyncpg requires a JSON string for jsonb columns, not a Python object.
+                if isinstance(v, (dict, list)):
+                    v = json.dumps(v)
+                elif v is not None and not isinstance(v, str):
+                    v = None
+            if c == "embedding" and isinstance(v, bytes):
+                # Convert numpy float32 bytes to pgvector text format '[f1,f2,...]'.
+                import numpy as np
+
+                arr = np.frombuffer(v, dtype=np.float32)
+                v = "[" + ",".join(str(x) for x in arr.tolist()) + "]"
+            if c in ("committed_at", "valid_from", "valid_until") and isinstance(v, str):
+                # asyncpg requires datetime objects for TIMESTAMPTZ columns.
+                from datetime import datetime
+
                 try:
-                    v = json.loads(v)
-                except Exception:
+                    v = datetime.fromisoformat(v)
+                except ValueError:
                     v = None
             values.append(v)
 
         async with self.acquire() as conn:
-            # asyncpg returns the row; we use id as the "rowid" equivalent
             await conn.execute(f"INSERT INTO facts ({col_names}) VALUES ({placeholders})", *values)
-            # For FTS compatibility, return 0 (PostgreSQL uses generated tsvector)
             return 0
 
     async def find_duplicate(self, content_hash: str, scope: str) -> str | None:
@@ -203,6 +223,7 @@ class PostgresStorage(BaseStorage):
         fact_type: str | None = None,
         as_of: str | None = None,
         limit: int = 200,
+        offset: int = 0,
         include_ephemeral: bool = False,
     ) -> list[dict]:
         conditions = ["workspace_id = $1"]
@@ -233,10 +254,11 @@ class PostgresStorage(BaseStorage):
             conditions.append("durability = 'durable'")
 
         params.append(limit)
+        params.append(offset)
         where = " AND ".join(conditions)
         async with self.acquire() as conn:
             rows = await conn.fetch(
-                f"SELECT * FROM facts WHERE {where} ORDER BY committed_at DESC LIMIT ${idx}",
+                f"SELECT * FROM facts WHERE {where} ORDER BY committed_at DESC LIMIT ${idx} OFFSET ${idx + 1}",
                 *params,
             )
         return [_row_to_dict(r) for r in rows]
@@ -1674,6 +1696,569 @@ class PostgresStorage(BaseStorage):
             "audit_rows_scrubbed": audit_actor + audit_fact,
         }
 
+    # ── Webhook methods ──────────────────────────────────────────────
+
+    async def insert_webhook(self, webhook: dict[str, Any]) -> None:
+        async with self.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO webhooks(id, url, events, secret, active, created_at, workspace_id)
+                   VALUES ($1, $2, $3, $4, TRUE, $5, $6)""",
+                webhook["id"],
+                webhook["url"],
+                webhook["events"],
+                webhook.get("secret"),
+                webhook.get("created_at", _now_ts()),
+                self.workspace_id,
+            )
+
+    async def get_webhooks(self) -> list[dict]:
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM webhooks WHERE workspace_id = $1 AND active = TRUE ORDER BY created_at DESC",
+                self.workspace_id,
+            )
+        return [_row_to_dict(r) for r in rows]
+
+    async def get_webhook_by_id(self, webhook_id: str) -> dict | None:
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM webhooks WHERE id = $1 AND workspace_id = $2",
+                webhook_id,
+                self.workspace_id,
+            )
+        return _row_to_dict(row) if row else None
+
+    async def delete_webhook(self, webhook_id: str) -> bool:
+        async with self.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE webhooks SET active = FALSE WHERE id = $1 AND workspace_id = $2",
+                webhook_id,
+                self.workspace_id,
+            )
+        return int(result.split()[-1]) > 0
+
+    async def queue_webhook_delivery(self, delivery: dict[str, Any]) -> None:
+        async with self.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO webhook_deliveries(id, webhook_id, event, payload, status, attempts, created_at, workspace_id)
+                   VALUES ($1, $2, $3, $4, 'pending', 0, $5, $6)""",
+                delivery["id"],
+                delivery["webhook_id"],
+                delivery["event"],
+                delivery["payload"],
+                delivery.get("created_at", _now_ts()),
+                self.workspace_id,
+            )
+
+    async def get_pending_deliveries(self) -> list[dict]:
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT * FROM webhook_deliveries
+                   WHERE status = 'pending' AND attempts < 3 AND workspace_id = $1
+                   ORDER BY created_at ASC LIMIT 100""",
+                self.workspace_id,
+            )
+        return [_row_to_dict(r) for r in rows]
+
+    async def mark_delivery_done(self, delivery_id: str) -> None:
+        async with self.acquire() as conn:
+            await conn.execute(
+                "UPDATE webhook_deliveries SET status = 'done', attempts = attempts + 1 WHERE id = $1",
+                delivery_id,
+            )
+
+    async def mark_delivery_failed(self, delivery_id: str) -> None:
+        async with self.acquire() as conn:
+            await conn.execute(
+                """UPDATE webhook_deliveries
+                   SET attempts = attempts + 1,
+                       status = CASE WHEN attempts + 1 >= 3 THEN 'failed' ELSE 'pending' END
+                   WHERE id = $1""",
+                delivery_id,
+            )
+
+    # ── Resolution rule methods ──────────────────────────────────────
+
+    async def insert_rule(self, rule: dict[str, Any]) -> None:
+        async with self.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO resolution_rules(id, scope_prefix, condition_type, condition_value,
+                   resolution_type, created_at, active, workspace_id)
+                   VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7)""",
+                rule["id"],
+                rule["scope_prefix"],
+                rule["condition_type"],
+                rule["condition_value"],
+                rule["resolution_type"],
+                rule.get("created_at", _now_ts()),
+                self.workspace_id,
+            )
+
+    async def get_rules(self) -> list[dict]:
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM resolution_rules WHERE workspace_id = $1 AND active = TRUE ORDER BY created_at DESC",
+                self.workspace_id,
+            )
+        return [_row_to_dict(r) for r in rows]
+
+    async def get_rule_by_id(self, rule_id: str) -> dict | None:
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM resolution_rules WHERE id = $1 AND workspace_id = $2",
+                rule_id,
+                self.workspace_id,
+            )
+        return _row_to_dict(row) if row else None
+
+    async def delete_rule(self, rule_id: str) -> bool:
+        async with self.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE resolution_rules SET active = FALSE WHERE id = $1 AND workspace_id = $2",
+                rule_id,
+                self.workspace_id,
+            )
+        return int(result.split()[-1]) > 0
+
+    # ── Scope registry methods ───────────────────────────────────────
+
+    async def upsert_scope(self, scope_data: dict[str, Any]) -> None:
+        async with self.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO scopes(scope, description, owner_agent_id, retention_days, created_at, workspace_id)
+                   VALUES ($1, $2, $3, $4, $5, $6)
+                   ON CONFLICT(scope, workspace_id) DO UPDATE SET
+                       description = COALESCE(EXCLUDED.description, scopes.description),
+                       owner_agent_id = COALESCE(EXCLUDED.owner_agent_id, scopes.owner_agent_id),
+                       retention_days = COALESCE(EXCLUDED.retention_days, scopes.retention_days)""",
+                scope_data["scope"],
+                scope_data.get("description"),
+                scope_data.get("owner_agent_id"),
+                scope_data.get("retention_days"),
+                _now_ts(),
+                self.workspace_id,
+            )
+
+    async def get_scopes(self) -> list[dict]:
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM scopes WHERE workspace_id = $1 ORDER BY scope ASC",
+                self.workspace_id,
+            )
+        return [_row_to_dict(r) for r in rows]
+
+    async def get_scope_by_name(self, scope: str) -> dict | None:
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM scopes WHERE scope = $1 AND workspace_id = $2",
+                scope,
+                self.workspace_id,
+            )
+        return _row_to_dict(row) if row else None
+
+    async def get_scope_analytics(self, scope: str) -> dict:
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) AS cnt FROM facts WHERE scope = $1 AND workspace_id = $2",
+                scope,
+                self.workspace_id,
+            )
+            fact_count = row["cnt"] if row else 0
+
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) AS cnt FROM facts WHERE scope = $1 AND workspace_id = $2 AND valid_until IS NULL",
+                scope,
+                self.workspace_id,
+            )
+            active_fact_count = row["cnt"] if row else 0
+
+            row = await conn.fetchrow(
+                """SELECT COUNT(*) AS cnt FROM conflicts c
+                   JOIN facts fa ON c.fact_a_id = fa.id
+                   WHERE fa.scope = $1 AND c.workspace_id = $2""",
+                scope,
+                self.workspace_id,
+            )
+            conflict_count = row["cnt"] if row else 0
+
+            row = await conn.fetchrow(
+                """SELECT agent_id, COUNT(*) AS cnt FROM facts
+                   WHERE scope = $1 AND workspace_id = $2
+                   GROUP BY agent_id ORDER BY cnt DESC LIMIT 1""",
+                scope,
+                self.workspace_id,
+            )
+            most_active_agent = row["agent_id"] if row else None
+
+            row = await conn.fetchrow(
+                "SELECT AVG(confidence) AS avg_conf FROM facts WHERE scope = $1 AND workspace_id = $2 AND valid_until IS NULL",
+                scope,
+                self.workspace_id,
+            )
+            avg_confidence = (
+                round(float(row["avg_conf"]), 4) if row and row["avg_conf"] is not None else 0.0
+            )
+
+        conflict_rate = round(conflict_count / fact_count, 4) if fact_count > 0 else 0.0
+        return {
+            "scope": scope,
+            "fact_count": fact_count,
+            "active_fact_count": active_fact_count,
+            "conflict_count": conflict_count,
+            "conflict_rate": conflict_rate,
+            "most_active_agent": most_active_agent,
+            "avg_confidence": avg_confidence,
+        }
+
+    # ── Usage event methods ──────────────────────────────────────────
+
+    async def record_usage_event(
+        self, event_type: str, quantity: int = 1, billing_period: str | None = None
+    ) -> None:
+        import uuid
+
+        if billing_period is None:
+            now = datetime.now(timezone.utc)
+            billing_period = f"{now.year}-{now.month:02d}"
+
+        async with self.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO usage_events (id, workspace_id, event_type, quantity, billing_period, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+                str(uuid.uuid4()),
+                self.workspace_id,
+                event_type,
+                quantity,
+                billing_period,
+                _now_ts(),
+            )
+
+    async def get_usage_events(
+        self, event_type: str | None = None, billing_period: str | None = None
+    ) -> list[dict]:
+        conditions = ["workspace_id = $1"]
+        params: list[Any] = [self.workspace_id]
+
+        if event_type:
+            params.append(event_type)
+            conditions.append(f"event_type = ${len(params)}")
+        if billing_period:
+            params.append(billing_period)
+            conditions.append(f"billing_period = ${len(params)}")
+
+        where = " AND ".join(conditions)
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM usage_events WHERE {where} ORDER BY created_at DESC",
+                *params,
+            )
+        return [_row_to_dict(r) for r in rows]
+
+    async def get_unsynced_usage_events(self, billing_period: str) -> list[dict]:
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM usage_events WHERE workspace_id = $1 AND billing_period = $2 AND synced_to_stripe = FALSE ORDER BY created_at",
+                self.workspace_id,
+                billing_period,
+            )
+        return [_row_to_dict(r) for r in rows]
+
+    async def mark_usage_events_synced(self, event_ids: list[str]) -> None:
+        if not event_ids:
+            return
+        async with self.acquire() as conn:
+            await conn.execute(
+                "UPDATE usage_events SET synced_to_stripe = TRUE WHERE id = ANY($1::text[])",
+                event_ids,
+            )
+
+    # ── TKG (Temporal Knowledge Graph) methods ───────────────────────
+
+    async def insert_tkg_node(self, node: dict[str, Any]) -> None:
+        async with self.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO tkg_nodes (id, name, entity_type, summary, first_seen, last_seen, fact_count, workspace_id)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+                node["id"],
+                node["name"],
+                node["entity_type"],
+                node.get("summary", ""),
+                node["first_seen"],
+                node["last_seen"],
+                node.get("fact_count", 1),
+                node.get("workspace_id", self.workspace_id),
+            )
+
+    async def get_tkg_node_by_name(self, name: str) -> dict | None:
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM tkg_nodes WHERE name = $1 AND workspace_id = $2",
+                name,
+                self.workspace_id,
+            )
+        return _row_to_dict(row) if row else None
+
+    async def get_tkg_node_by_id(self, node_id: str) -> dict | None:
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM tkg_nodes WHERE id = $1",
+                node_id,
+            )
+        return _row_to_dict(row) if row else None
+
+    async def update_tkg_node_seen(self, node_id: str, timestamp: str) -> None:
+        async with self.acquire() as conn:
+            await conn.execute(
+                "UPDATE tkg_nodes SET last_seen = $1, fact_count = fact_count + 1 WHERE id = $2",
+                timestamp,
+                node_id,
+            )
+
+    async def insert_tkg_edge(self, edge: dict[str, Any]) -> None:
+        async with self.acquire() as conn:
+            await conn.execute(
+                """INSERT INTO tkg_edges
+                   (id, source_node_id, target_node_id, relation_type, fact_label,
+                    fact_id, agent_id, scope, created_at, expired_at, valid_at,
+                    invalid_at, confidence, workspace_id)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)""",
+                edge["id"],
+                edge["source_node_id"],
+                edge["target_node_id"],
+                edge["relation_type"],
+                edge["fact_label"],
+                edge["fact_id"],
+                edge["agent_id"],
+                edge["scope"],
+                edge["created_at"],
+                edge.get("expired_at"),
+                edge.get("valid_at"),
+                edge.get("invalid_at"),
+                edge.get("confidence", 0.8),
+                edge.get("workspace_id", self.workspace_id),
+            )
+
+    async def get_active_tkg_edges(self, source_node_id: str, relation_type: str) -> list[dict]:
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT * FROM tkg_edges
+                   WHERE source_node_id = $1 AND relation_type = $2 AND expired_at IS NULL
+                   AND workspace_id = $3""",
+                source_node_id,
+                relation_type,
+                self.workspace_id,
+            )
+        return [_row_to_dict(r) for r in rows]
+
+    async def expire_tkg_edge(self, edge_id: str, expired_at: str) -> None:
+        async with self.acquire() as conn:
+            await conn.execute(
+                "UPDATE tkg_edges SET expired_at = $1 WHERE id = $2",
+                expired_at,
+                edge_id,
+            )
+
+    async def get_tkg_edges_for_node(
+        self,
+        node_id: str,
+        relation_type: str | None = None,
+        include_expired: bool = True,
+    ) -> list[dict]:
+        async with self.acquire() as conn:
+            if relation_type and include_expired:
+                rows = await conn.fetch(
+                    """SELECT * FROM tkg_edges
+                       WHERE (source_node_id = $1 OR target_node_id = $1)
+                       AND relation_type = $2 AND workspace_id = $3
+                       ORDER BY created_at""",
+                    node_id,
+                    relation_type,
+                    self.workspace_id,
+                )
+            elif relation_type and not include_expired:
+                rows = await conn.fetch(
+                    """SELECT * FROM tkg_edges
+                       WHERE (source_node_id = $1 OR target_node_id = $1)
+                       AND relation_type = $2 AND expired_at IS NULL AND workspace_id = $3
+                       ORDER BY created_at""",
+                    node_id,
+                    relation_type,
+                    self.workspace_id,
+                )
+            elif include_expired:
+                rows = await conn.fetch(
+                    """SELECT * FROM tkg_edges
+                       WHERE (source_node_id = $1 OR target_node_id = $1)
+                       AND workspace_id = $2
+                       ORDER BY created_at""",
+                    node_id,
+                    self.workspace_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    """SELECT * FROM tkg_edges
+                       WHERE (source_node_id = $1 OR target_node_id = $1)
+                       AND expired_at IS NULL AND workspace_id = $2
+                       ORDER BY created_at""",
+                    node_id,
+                    self.workspace_id,
+                )
+        return [_row_to_dict(r) for r in rows]
+
+    async def get_tkg_nodes_with_expired_edges(self, scope: str | None = None) -> list[dict]:
+        async with self.acquire() as conn:
+            if scope:
+                rows = await conn.fetch(
+                    """SELECT DISTINCT n.* FROM tkg_nodes n
+                       JOIN tkg_edges e ON n.id = e.source_node_id
+                       WHERE e.expired_at IS NOT NULL AND e.scope = $1
+                       AND n.workspace_id = $2""",
+                    scope,
+                    self.workspace_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    """SELECT DISTINCT n.* FROM tkg_nodes n
+                       JOIN tkg_edges e ON n.id = e.source_node_id
+                       WHERE e.expired_at IS NOT NULL
+                       AND n.workspace_id = $1""",
+                    self.workspace_id,
+                )
+        return [_row_to_dict(r) for r in rows]
+
+    async def get_old_active_tkg_edges(
+        self, max_age_days: int = 30, scope: str | None = None
+    ) -> list[dict]:
+        async with self.acquire() as conn:
+            if scope:
+                rows = await conn.fetch(
+                    """SELECT * FROM tkg_edges
+                       WHERE expired_at IS NULL AND scope = $1
+                       AND EXTRACT(EPOCH FROM (NOW() - created_at)) / 86400 > $2
+                       AND workspace_id = $3""",
+                    scope,
+                    max_age_days,
+                    self.workspace_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    """SELECT * FROM tkg_edges
+                       WHERE expired_at IS NULL
+                       AND EXTRACT(EPOCH FROM (NOW() - created_at)) / 86400 > $1
+                       AND workspace_id = $2""",
+                    max_age_days,
+                    self.workspace_id,
+                )
+        return [_row_to_dict(r) for r in rows]
+
+    async def get_newer_tkg_edges(self, source_node_id: str, after: str) -> list[dict]:
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                """SELECT * FROM tkg_edges
+                   WHERE source_node_id = $1 AND created_at > $2
+                   AND workspace_id = $3""",
+                source_node_id,
+                after,
+                self.workspace_id,
+            )
+        return [_row_to_dict(r) for r in rows]
+
+    async def get_tkg_multi_agent_edges(self, scope: str | None = None) -> list[dict]:
+        async with self.acquire() as conn:
+            if scope:
+                rows = await conn.fetch(
+                    """SELECT e.* FROM tkg_edges e
+                       WHERE e.expired_at IS NULL AND e.scope = $1 AND e.workspace_id = $2
+                       AND EXISTS (
+                           SELECT 1 FROM tkg_edges e2
+                           WHERE e2.source_node_id = e.source_node_id
+                           AND e2.relation_type = e.relation_type
+                           AND e2.agent_id != e.agent_id
+                           AND e2.expired_at IS NULL
+                           AND e2.workspace_id = e.workspace_id
+                       )""",
+                    scope,
+                    self.workspace_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    """SELECT e.* FROM tkg_edges e
+                       WHERE e.expired_at IS NULL AND e.workspace_id = $1
+                       AND EXISTS (
+                           SELECT 1 FROM tkg_edges e2
+                           WHERE e2.source_node_id = e.source_node_id
+                           AND e2.relation_type = e.relation_type
+                           AND e2.agent_id != e.agent_id
+                           AND e2.expired_at IS NULL
+                           AND e2.workspace_id = e.workspace_id
+                       )""",
+                    self.workspace_id,
+                )
+        return [_row_to_dict(r) for r in rows]
+
+    async def get_tkg_stats(self, scope: str | None = None) -> dict[str, int]:
+        async with self.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT COUNT(*) FROM tkg_nodes WHERE workspace_id = $1",
+                self.workspace_id,
+            )
+            total_nodes = row[0] if row else 0
+
+            if scope:
+                row = await conn.fetchrow(
+                    "SELECT COUNT(*) FROM tkg_edges WHERE workspace_id = $1 AND scope = $2",
+                    self.workspace_id,
+                    scope,
+                )
+            else:
+                row = await conn.fetchrow(
+                    "SELECT COUNT(*) FROM tkg_edges WHERE workspace_id = $1",
+                    self.workspace_id,
+                )
+            total_edges = row[0] if row else 0
+
+            if scope:
+                row = await conn.fetchrow(
+                    "SELECT COUNT(*) FROM tkg_edges WHERE expired_at IS NULL AND workspace_id = $1 AND scope = $2",
+                    self.workspace_id,
+                    scope,
+                )
+            else:
+                row = await conn.fetchrow(
+                    "SELECT COUNT(*) FROM tkg_edges WHERE expired_at IS NULL AND workspace_id = $1",
+                    self.workspace_id,
+                )
+            active_edges = row[0] if row else 0
+
+            row = await conn.fetchrow(
+                "SELECT COUNT(DISTINCT relation_type) FROM tkg_edges WHERE workspace_id = $1",
+                self.workspace_id,
+            )
+            unique_relations = row[0] if row else 0
+
+        return {
+            "total_nodes": total_nodes,
+            "total_edges": total_edges,
+            "active_edges": active_edges,
+            "expired_edges": total_edges - active_edges,
+            "unique_relations": unique_relations,
+        }
+
+    async def update_tkg_node_summary(self, node_id: str, summary: str) -> None:
+        async with self.acquire() as conn:
+            await conn.execute(
+                "UPDATE tkg_nodes SET summary = $1 WHERE id = $2",
+                summary,
+                node_id,
+            )
+
+    async def get_all_tkg_nodes(self) -> list[dict]:
+        async with self.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM tkg_nodes WHERE workspace_id = $1",
+                self.workspace_id,
+            )
+        return [_row_to_dict(r) for r in rows]
+
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -1687,8 +2272,17 @@ def _row_to_dict(row: Any) -> dict:
     if row is None:
         return {}
     d = dict(row)
-    # Serialize datetime objects to ISO strings for compatibility with SQLiteStorage consumers
     for k, v in d.items():
         if isinstance(v, datetime):
+            # Serialize datetime objects to ISO strings for compatibility with SQLiteStorage consumers
             d[k] = v.isoformat()
+        elif k == "embedding" and isinstance(v, str) and v:
+            # Convert pgvector text '[f1,f2,...]' back to numpy float32 bytes
+            import numpy as np
+
+            try:
+                floats = [float(x) for x in v.strip("[]").split(",")]
+                d[k] = np.array(floats, dtype=np.float32).tobytes()
+            except (ValueError, AttributeError):
+                d[k] = None
     return d
