@@ -73,8 +73,8 @@ class BaseStorage(ABC):
         ...
 
     @abstractmethod
-    async def get_conflicting_fact_ids(self, fact_id: str) -> set[str]:
-        """Return all fact IDs that already have any conflict with fact_id."""
+    async def get_conflicting_fact_ids(self, fact_id: str, status: str = "open") -> set[str]:
+        """Return fact IDs that have conflicts with fact_id."""
         ...
 
     @abstractmethod
@@ -123,7 +123,7 @@ class BaseStorage(ABC):
     async def insert_conflict(self, conflict: dict[str, Any]) -> None: ...
 
     @abstractmethod
-    async def conflict_exists(self, fact_a_id: str, fact_b_id: str) -> bool: ...
+    async def conflict_exists(self, fact_a_id: str, fact_b_id: str, include_resolved: bool = False) -> bool: ...
 
     @abstractmethod
     async def get_conflicts(self, scope: str | None = None, status: str = "open") -> list[dict]: ...
@@ -630,12 +630,22 @@ class SQLiteStorage(BaseStorage):
         rows = await cursor.fetchall()
         return {row["id"]: dict(row) for row in rows}
 
-    async def get_conflicting_fact_ids(self, fact_id: str) -> set[str]:
-        """Return all fact IDs that already have any conflict (any status) with fact_id."""
+    async def get_conflicting_fact_ids(self, fact_id: str, status: str = "open") -> set[str]:
+        """Return fact IDs that have OPEN conflicts with fact_id.
+        
+        Args:
+            fact_id: The fact to check
+            status: Filter by status - "open", "resolved", "dismissed", or "all" (default: "open")
+        """
+        if status == "all":
+            status_filter = ""
+        else:
+            status_filter = f"AND status = '{status}'"
         cursor = await self.db.execute(
-            """SELECT fact_a_id, fact_b_id FROM conflicts
+            f"""SELECT fact_a_id, fact_b_id FROM conflicts
                WHERE workspace_id = ?
-                 AND (fact_a_id = ? OR fact_b_id = ?)""",
+                 AND (fact_a_id = ? OR fact_b_id = ?)
+                 {status_filter}""",
             (self.workspace_id, fact_id, fact_id),
         )
         rows = await cursor.fetchall()
@@ -782,13 +792,24 @@ class SQLiteStorage(BaseStorage):
         )
         await self.db.commit()
 
-    async def conflict_exists(self, fact_a_id: str, fact_b_id: str) -> bool:
-        """Check if a conflict already exists between two facts (in either order) within this workspace."""
+    async def conflict_exists(self, fact_a_id: str, fact_b_id: str, include_resolved: bool = False) -> bool:
+        """Check if an OPEN conflict already exists between two facts.
+        
+        Args:
+            fact_a_id: First fact ID
+            fact_b_id: Second fact ID
+            include_resolved: If True, also check resolved/dismissed conflicts (default: False)
+        """
+        if include_resolved:
+            status_filter = ""
+        else:
+            status_filter = "AND status = 'open'"
         cursor = await self.db.execute(
-            """SELECT 1 FROM conflicts
+            f"""SELECT 1 FROM conflicts
                WHERE workspace_id = ?
                  AND ((fact_a_id = ? AND fact_b_id = ?)
-                  OR  (fact_a_id = ? AND fact_b_id = ?))""",
+                  OR  (fact_a_id = ? AND fact_b_id = ?))
+                 {status_filter}""",
             (self.workspace_id, fact_a_id, fact_b_id, fact_b_id, fact_a_id),
         )
         return await cursor.fetchone() is not None
