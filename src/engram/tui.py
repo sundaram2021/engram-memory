@@ -240,9 +240,7 @@ def run_tui(ws: Any, ctx: Any) -> None:
                         focusable=False,
                     ),
                     wrap_lines=True,
-                    dont_extend_height=True,
                 ),
-                Window(),  # absorb remaining space
                 Window(
                     FormattedTextControl(separator_text, focusable=False),
                     height=D.exact(1),
@@ -308,13 +306,15 @@ def _run_engram_command(cmd: str, arg: str, output_lines: list[tuple[str, str]])
     try:
         result = subprocess.run(cli_args, capture_output=True, text=True, timeout=30)
         combined = (result.stdout + result.stderr).strip()
-        if combined:
+        if combined in ("[]", "{}", ""):
+            output_lines.append(("class:output.dim", f"  No {cmd} found.\n"))
+        elif combined:
             err = result.returncode != 0
             for line in combined.splitlines():
                 style = "class:output.error" if err else "class:output"
                 output_lines.append((style, f"  {line}\n"))
         else:
-            output_lines.append(("class:output.dim", "  (no output)\n"))
+            output_lines.append(("class:output.dim", f"  No output from {cmd}.\n"))
     except subprocess.TimeoutExpired:
         output_lines.append(("class:output.error", "  Command timed out after 30s\n"))
     except FileNotFoundError:
