@@ -789,6 +789,36 @@ def status() -> None:
 
     click.echo(f"\nSchema: {ws.schema}")
 
+    try:
+        import asyncio
+        from engram.storage import SQLiteStorage, DEFAULT_DB_PATH
+        from engram.postgres_storage import PostgresStorage
+
+        db_url = os.environ.get("ENGRAM_DB_URL", "")
+        if db_url:
+            storage = PostgresStorage(db_url=db_url, workspace_id=ws.engram_id, schema=ws.schema)
+        else:
+            storage = SQLiteStorage(str(DEFAULT_DB_PATH), workspace_id=ws.engram_id)
+
+        async def get_conflict_count():
+            await storage.connect()
+            try:
+                open_count = await storage.count_conflicts(status="open")
+                resolved_count = await storage.count_conflicts(status="resolved")
+                return open_count, resolved_count
+            finally:
+                await storage.close()
+
+        open_count, resolved_count = asyncio.run(get_conflict_count())
+        if open_count > 0:
+            click.echo(f"\n⚠️  {open_count} open conflict(s) - run 'engram conflicts' to view")
+        else:
+            click.echo(f"\n✓ No open conflicts")
+        if resolved_count > 0:
+            click.echo(f"  ({resolved_count} resolved)")
+    except Exception:
+        pass
+
 
 # ── engram stats ───────────────────────────────────────────────────────────
 
@@ -844,6 +874,63 @@ def stats(output_json: bool) -> None:
         click.echo("(Run engram serve --http to see full stats)")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
+
+
+# ── engram conflicts ─────────────────────────────────────────────────
+
+
+@main.command()
+@click.option("--status", default="open", help="Filter by status: open, resolved, dismissed, all")
+@click.option("--limit", default=10, help="Number of conflicts to show")
+def conflicts(status: str, limit: int) -> None:
+    """Show open conflicts in the workspace.
+
+    This command surfaces conflicts immediately so you can address them
+    before they cause issues in your team.
+
+    Examples:
+        engram conflicts              # Show open conflicts
+        engram conflicts --status all  # Show all conflicts
+    """
+    import asyncio
+    import os
+    from engram.workspace import read_workspace
+    from engram.storage import SQLiteStorage, DEFAULT_DB_PATH
+    from engram.postgres_storage import PostgresStorage
+
+    ws = read_workspace()
+    if not ws:
+        click.echo("Error: No workspace configured. Run 'engram init' or 'engram join' first.")
+        return
+
+    db_url = os.environ.get("ENGRAM_DB_URL", "")
+    if db_url:
+        storage = PostgresStorage(db_url=db_url, workspace_id=ws.engram_id, schema=ws.schema)
+    else:
+        storage = SQLiteStorage(str(DEFAULT_DB_PATH), workspace_id=ws.engram_id)
+
+    async def run():
+        await storage.connect()
+        try:
+            conflict_list = await storage.get_conflicts(status=status)
+            if not conflict_list:
+                click.echo(f"No {status} conflicts found.")
+                return
+
+            click.echo(f"=== {status.title()} Conflicts ({len(conflict_list)}) ===\n")
+            for i, c in enumerate(conflict_list[:limit], 1):
+                click.echo(f"[{i}] {c.get('severity', 'unknown')} - {c.get('detection_tier', 'N/A')}")
+                click.echo(f"    {c.get('fact_a_content', '')[:60]}...")
+                click.echo(f"    vs")
+                click.echo(f"    {c.get('fact_b_content', '')[:60]}...")
+                if c.get('explanation'):
+                    click.echo(f"    Explanation: {c.get('explanation')[:80]}")
+                click.echo(f"    Status: {c.get('status')} | Detected: {c.get('detected_at', '')[:19]}")
+                click.echo("")
+        finally:
+            await storage.close()
+
+    asyncio.run(run())
 
 
 # ── engram promote ───────────────────────────────────────────────────
