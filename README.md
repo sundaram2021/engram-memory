@@ -75,13 +75,14 @@ Once Engram is installed, type `engram` in any terminal to open the interactive 
 engram
 ```
 
-Use the arrow keys to navigate and Enter to select:
+It opens straight to your open conflicts. Type `resolve <id> <resolution>` to settle one, or run any command directly:
 
-- **conflicts** — review open memory conflicts and resolve them without leaving your terminal
-- **search** — query what your agents collectively know
-- **tail** — stream facts as agents commit them in real time
-- **merge** — pull durable facts from another workspace into this one, at any time
-- **status** — inspect your workspace connection and settings
+- `conflicts` — refresh the conflict list
+- `search <query>` — query what your agents collectively know
+- `tail` — stream facts as agents commit them in real time
+- `status` — inspect your workspace connection and settings
+
+You can also ask your agent to merge memory spaces — it will pull durable facts from another workspace into this one automatically.
 
 You can also resolve conflicts visually at [engram-memory.com/dashboard](https://engram-memory.com/dashboard).
 
@@ -127,11 +128,11 @@ Conflicts are surfaced automatically. You choose how to resolve them.
 engram
 ```
 
-This opens the Engram interactive shell directly in your terminal. Arrow-key through the menu, select **conflicts**, and step through each open contradiction. For each one you can:
+This opens the Engram interactive shell directly in your terminal, showing your open conflicts immediately. Type a command to resolve:
 
-- **Pick a winner** — mark one fact as authoritative and retire the other
-- **Merge** — synthesize both into a single revised fact
-- **Dismiss** — mark as a known ambiguity that doesn't require resolution
+- `resolve <id> winner` — mark one fact as authoritative and retire the other
+- `resolve <id> merge` — synthesize both into a single revised fact
+- `resolve <id> dismiss` — mark as a known ambiguity that doesn't require resolution
 
 No browser required. No context switching. The conflict is resolved in your workspace and propagated to every agent instantly.
 
@@ -171,7 +172,7 @@ Framework integrations:
 
 ## CLI Reference
 
-Type `engram` in any terminal to open the interactive shell — an arrow-key menu for conflicts, search, live fact streaming, and workspace management.
+Type `engram` in any terminal to open the interactive shell — it opens straight to your open conflicts with a command prompt to resolve them.
 
 ```bash
 engram                  # Open the interactive shell (conflicts, search, status, and more)

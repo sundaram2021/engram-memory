@@ -37,42 +37,21 @@ _STYLE = Style.from_dict(
         "output.cmd": "bold noinherit #00dd55",
         "output.error": "noinherit #ff5555",
         "output.dim": "noinherit #555555",
-        "menu.selected": "bold noinherit #00dd55",
-        "menu.item": "noinherit #aaaaaa",
-        "menu.desc": "noinherit #555555",
-        "menu.arrow": "bold noinherit #00dd55",
         "toolbar": "noinherit bg:#111111 #444444",
         "toolbar.key": "noinherit bg:#111111 #00dd55",
         "toolbar.sep": "noinherit bg:#111111 #333333",
     }
 )
 
-_MENU_ITEMS: list[tuple[str, str, str]] = [
-    ("conflicts", "conflicts", "review open memory conflicts"),
-    ("search", "search <q>", "query workspace memory"),
-    ("tail", "tail", "stream live workspace facts"),
-    ("merge", "merge", "merge another workspace into this one"),
-    ("status", "status", "workspace info"),
-    ("whoami", "whoami", "show identity"),
-    ("export", "export", "export workspace data"),
-]
-
-_VALID_COMMANDS = {cmd for cmd, _, _ in _MENU_ITEMS} | {"info", "stats", "verify", "doctor"}
-
-_MENU_HEIGHT = len(_MENU_ITEMS) + 2  # blank line top + blank line bottom
+_VALID_COMMANDS = {"conflicts", "resolve", "search", "status", "whoami", "export", "info", "stats", "verify", "doctor"}
 
 _HELP_LINES: list[tuple[str, str]] = [
     ("class:output.dim", "\n"),
-    ("class:output", "  Available commands:\n"),
-    ("class:output", "    conflicts   — review open memory conflicts\n"),
-    ("class:output", "    search <q>  — query workspace memory\n"),
-    ("class:output", "    tail        — stream live facts\n"),
-    ("class:output", "    merge       — merge another workspace into this one\n"),
-    ("class:output", "    status      — workspace info\n"),
-    ("class:output", "    whoami      — show identity\n"),
-    ("class:output", "    export      — export workspace data\n"),
-    ("class:output", "    clear       — clear output  (Ctrl+L)\n"),
-    ("class:output", "    quit / q    — exit          (Ctrl+C)\n"),
+    ("class:output", "  Commands:\n"),
+    ("class:output", "    resolve <id> <resolution>  — resolve a conflict\n"),
+    ("class:output", "    conflicts                  — refresh conflicts\n"),
+    ("class:output", "    clear                      — clear output  (Ctrl+L)\n"),
+    ("class:output", "    quit / q                   — exit          (Ctrl+C)\n"),
     ("class:output.dim", "\n"),
 ]
 
@@ -94,7 +73,7 @@ def run_tui(ws: Any, ctx: Any) -> None:
         cwd = os.getcwd()
 
     # Mutable state
-    state: dict[str, Any] = {"selected": 0}
+    state: dict[str, Any] = {}
     output_lines: list[tuple[str, str]] = []
 
     # ── formatted text producers ──────────────────────────────────────────
@@ -128,7 +107,7 @@ def run_tui(ws: Any, ctx: Any) -> None:
             [("class:header.logo", logo[2]), ("class:header.cwd", f"   {cwd}")],
             [
                 ("class:header.logo", logo[3]),
-                ("class:header.tagline", "   Shared memory for engineering teams"),
+                ("class:header.tagline", "   Shared memory for AI agents"),
             ],
         ]
 
@@ -148,33 +127,14 @@ def run_tui(ws: Any, ctx: Any) -> None:
         total = sum(t.count("\n") for _, t in output_lines)
         return Point(x=0, y=max(0, total - 1))
 
-    def menu_text() -> AnyFormattedText:
-        result: list[tuple[str, str]] = [("class:output.dim", "\n")]
-        for i, (_, display, desc) in enumerate(_MENU_ITEMS):
-            if i == state["selected"]:
-                result.append(("class:menu.arrow", "  ❯ "))
-                result.append(("class:menu.selected", f"{display:<14}"))
-                result.append(("class:menu.desc", f"  {desc}\n"))
-            else:
-                result.append(("", "    "))
-                result.append(("class:menu.item", f"{display:<14}"))
-                result.append(("class:menu.desc", f"  {desc}\n"))
-        result.append(("class:output.dim", "\n"))
-        return result
-
     def toolbar_text() -> AnyFormattedText:
         return [
-            ("class:toolbar.key", "  ↑↓"),
-            ("class:toolbar", "/"),
-            ("class:toolbar.key", "j"),
-            ("class:toolbar", "/"),
-            ("class:toolbar.key", "k"),
-            ("class:toolbar", " navigate"),
+            ("class:toolbar", "  type "),
+            ("class:toolbar.key", "resolve <id> <resolution>"),
+            ("class:toolbar", " to settle a conflict"),
             ("class:toolbar.sep", "   ·   "),
-            ("class:toolbar.key", "Enter"),
-            ("class:toolbar", " select"),
-            ("class:toolbar.sep", "   ·   "),
-            ("class:toolbar", "or type a command"),
+            ("class:toolbar.key", "?"),
+            ("class:toolbar", " help"),
             ("class:toolbar.sep", "   ·   "),
             ("class:toolbar.key", "Ctrl+C"),
             ("class:toolbar", " quit"),
@@ -193,13 +153,6 @@ def run_tui(ws: Any, ctx: Any) -> None:
     def handle_command(text: str, app: Application) -> None:
         text = text.strip()
         if not text:
-            # Enter with empty input = run selected menu item
-            cmd, _, _ = _MENU_ITEMS[state["selected"]]
-            if cmd == "search":
-                # Pre-fill input so user can type their query
-                input_buf.set_document(input_buf.document.__class__("search ", cursor_position=7))
-                return
-            run_cmd(cmd, "", app)
             return
 
         output_lines.append(("class:output.cmd", f"\n  > {text}\n"))
@@ -226,41 +179,9 @@ def run_tui(ws: Any, ctx: Any) -> None:
             output_lines.append(("class:output.error", "  Usage: search <query>\n"))
             return
 
-        if cmd == "merge" and not arg:
-            output_lines.append(
-                ("class:output.error", "  Usage: merge --source-key <key> [--dry-run]\n")
-            )
-            return
-
         _run_engram_command(cmd, arg, output_lines)
 
     kb = KeyBindings()
-
-    @kb.add("up")
-    @kb.add("c-p")
-    def _up(event: Any) -> None:
-        if not input_buf.text:
-            state["selected"] = max(0, state["selected"] - 1)
-            event.app.invalidate()
-
-    @kb.add("down")
-    @kb.add("c-n")
-    def _down(event: Any) -> None:
-        if not input_buf.text:
-            state["selected"] = min(len(_MENU_ITEMS) - 1, state["selected"] + 1)
-            event.app.invalidate()
-
-    @kb.add("j")
-    def _j(event: Any) -> None:
-        if not input_buf.text:
-            state["selected"] = min(len(_MENU_ITEMS) - 1, state["selected"] + 1)
-            event.app.invalidate()
-
-    @kb.add("k")
-    def _k(event: Any) -> None:
-        if not input_buf.text:
-            state["selected"] = max(0, state["selected"] - 1)
-            event.app.invalidate()
 
     @kb.add("enter")
     def _enter(event: Any) -> None:
@@ -281,15 +202,12 @@ def run_tui(ws: Any, ctx: Any) -> None:
     # ── layout ────────────────────────────────────────────────────────────
     #
     # Order (top → bottom):
-    #   Header         (fixed 3 lines)
-    #   Separator      (fixed 1 line)
-    #   Output area    (flexible — empty space at top like Claude Code,
-    #                   fills with command output as you use it)
-    #   Separator      (fixed 1 line)
-    #   Menu list      (fixed — always visible above input)
-    #   Separator      (fixed 1 line)
-    #   Input bar      (fixed 1 line)
-    #   Toolbar        (fixed 1 line)
+    #   Header      (fixed 4 lines)
+    #   Separator   (fixed 1 line)
+    #   Output area (flexible — conflicts on startup, fills with output)
+    #   Separator   (fixed 1 line)
+    #   Input bar   (fixed 1 line)
+    #   Toolbar     (fixed 1 line)
 
     layout = Layout(
         HSplit(
@@ -304,7 +222,6 @@ def run_tui(ws: Any, ctx: Any) -> None:
                     height=D.exact(1),
                     dont_extend_height=True,
                 ),
-                # Flexible output: starts empty (blank space), fills as commands run
                 Window(
                     FormattedTextControl(
                         output_text,
@@ -314,17 +231,7 @@ def run_tui(ws: Any, ctx: Any) -> None:
                     wrap_lines=True,
                     dont_extend_height=True,
                 ),
-                Window(
-                    FormattedTextControl(separator_text, focusable=False),
-                    height=D.exact(1),
-                    dont_extend_height=True,
-                ),
-                # Always-visible menu — arrow keys navigate, Enter selects
-                Window(
-                    FormattedTextControl(menu_text, focusable=False),
-                    height=D.exact(_MENU_HEIGHT),
-                    dont_extend_height=True,
-                ),
+                Window(),  # absorb remaining space
                 Window(
                     FormattedTextControl(separator_text, focusable=False),
                     height=D.exact(1),
@@ -344,7 +251,6 @@ def run_tui(ws: Any, ctx: Any) -> None:
                     dont_extend_height=True,
                     style="class:toolbar",
                 ),
-                Window(),  # Absorb remaining vertical space to push elements up
             ]
         ),
         focused_element=input_buf,
@@ -372,6 +278,9 @@ def run_tui(ws: Any, ctx: Any) -> None:
             app.invalidate()
 
     threading.Thread(target=_blink, daemon=True).start()
+
+    # Load conflicts immediately on startup
+    _run_engram_command("conflicts", "", output_lines)
 
     app.run()
 
