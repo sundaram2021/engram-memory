@@ -26,9 +26,14 @@
     },
     "api/billing.py": {
       "excludeFiles": "{src/**,tests/**,docs/**,assets/**,.pytest_cache/**}"
+    },
+    "api/conflicts.py": {
+      "excludeFiles": "{src/**,tests/**,docs/**,assets/**,.pytest_cache/**}"
     }
   },
   "rewrites": [
+    { "source": "/api/conflicts", "destination": "/api/conflicts" },
+    { "source": "/api/conflicts/(.*)", "destination": "/api/conflicts" },
     { "source": "/mcp", "destination": "/api/mcp" },
     { "source": "/mcp/(.*)", "destination": "/api/mcp" },
     { "source": "/auth", "destination": "/api/auth" },
