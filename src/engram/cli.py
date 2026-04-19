@@ -1456,8 +1456,17 @@ def pre_commit_hook() -> None:
         load_project_credentials,
     )
 
-    server_url, invite_key = load_project_credentials(Path.cwd())
-    conflicts = fetch_open_conflicts(server_url, invite_key)
+    try:
+        server_url, invite_key = load_project_credentials(Path.cwd())
+    except RuntimeError:
+        # No .engram.env — workspace not configured for this repo; pass silently.
+        raise SystemExit(0)
+
+    try:
+        conflicts = fetch_open_conflicts(server_url, invite_key)
+    except RuntimeError as exc:
+        click.echo(f"Engram pre-commit check skipped: {exc}", err=True)
+        raise SystemExit(0)
 
     if conflicts:
         click.echo(format_conflict_blocker(conflicts))
