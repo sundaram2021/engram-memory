@@ -199,6 +199,8 @@ def _mcp_call(ws: Any, tool: str, arguments: dict[str, Any]) -> Any | None:
     # the raw body and stashes it in {"error": "<raw text>"}. Extract data: lines.
     if isinstance(data, dict) and "error" in data and "result" not in data:
         raw_text = data["error"]
+        if not isinstance(raw_text, str):
+            return None
         for line in raw_text.splitlines():
             line = line.strip()
             if line.startswith("data:"):
