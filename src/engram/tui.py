@@ -43,7 +43,18 @@ _STYLE = Style.from_dict(
     }
 )
 
-_VALID_COMMANDS = {"conflicts", "resolve", "search", "status", "whoami", "export", "info", "stats", "verify", "doctor"}
+_VALID_COMMANDS = {
+    "conflicts",
+    "resolve",
+    "search",
+    "status",
+    "whoami",
+    "export",
+    "info",
+    "stats",
+    "verify",
+    "doctor",
+}
 
 _HELP_LINES: list[tuple[str, str]] = [
     ("class:output.dim", "\n"),
