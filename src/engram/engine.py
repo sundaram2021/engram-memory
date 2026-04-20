@@ -1227,18 +1227,20 @@ class EngramEngine:
 
         now = datetime.now(timezone.utc).isoformat()
         conflict_id = uuid.uuid4().hex
-        await self.storage.insert_conflict({
-            "id": conflict_id,
-            "fact_a_id": fact_id,
-            "fact_b_id": synthetic_id,
-            "detected_at": now,
-            "detection_tier": "tier_codebase",
-            "nli_score": None,
-            "explanation": mismatch["explanation"],
-            "severity": "medium",
-            "status": "open",
-            "conflict_type": "genuine",
-        })
+        await self.storage.insert_conflict(
+            {
+                "id": conflict_id,
+                "fact_a_id": fact_id,
+                "fact_b_id": synthetic_id,
+                "detected_at": now,
+                "detection_tier": "tier_codebase",
+                "nli_score": None,
+                "explanation": mismatch["explanation"],
+                "severity": "medium",
+                "status": "open",
+                "conflict_type": "genuine",
+            }
+        )
 
         logger.info(
             "Codebase conflict: fact %s claims %s=%s but code has %s (%s)",
