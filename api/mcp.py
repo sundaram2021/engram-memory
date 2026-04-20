@@ -1357,6 +1357,131 @@ async def _tool_reset_invite_key(workspace_id: str, pool: Any) -> dict:
     }
 
 
+async def _tool_chat(
+    workspace_id: str,
+    pool: Any,
+    message: str,
+    history: list[dict[str, str]] | None = None,
+) -> dict:
+    """Conversational interface using server-side API keys."""
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    if not anthropic_key and not openai_key:
+        return {
+            "error": (
+                "No AI API key configured on server. "
+                "Set ANTHROPIC_API_KEY or OPENAI_API_KEY in your Vercel environment variables."
+            )
+        }
+
+    # Gather context: open conflicts + relevant memory facts
+    conflicts_text = ""
+    facts_text = ""
+    try:
+        async with _safe(pool) as conn:
+            conflict_rows = await conn.fetch(
+                "SELECT id, explanation, fact_a_content, fact_b_content, severity "
+                "FROM conflicts WHERE workspace_id = $1 AND status = 'open' "
+                "ORDER BY created_at DESC LIMIT 5",
+                workspace_id,
+            )
+            if conflict_rows:
+                lines = [f"Open conflicts ({len(conflict_rows)} total):"]
+                for c in conflict_rows:
+                    cid = (c["id"] or "")[:8]
+                    exp = c["explanation"] or "Conflicting information"
+                    fa = (c.get("fact_a_content") or "")[:120]
+                    fb = (c.get("fact_b_content") or "")[:120]
+                    lines.append(f"  [{cid}] {exp}")
+                    if fa:
+                        lines.append(f"    A: {fa}")
+                    if fb:
+                        lines.append(f"    B: {fb}")
+                conflicts_text = "\n".join(lines)
+
+            fact_rows = await conn.fetch(
+                "SELECT content, agent_id FROM facts "
+                "WHERE workspace_id = $1 AND content IS NOT NULL "
+                "ORDER BY created_at DESC LIMIT 8",
+                workspace_id,
+            )
+            if fact_rows:
+                lines = ["Relevant memory facts:"]
+                for f in fact_rows:
+                    agent = f.get("agent_id") or "agent"
+                    content = (f.get("content") or "")[:150]
+                    lines.append(f"  [{agent}] {content}")
+                facts_text = "\n".join(lines)
+    except Exception:
+        pass
+
+    system = (
+        "You are Engram, a shared team memory layer for AI agents. "
+        "You respond through a terminal TUI. Be concise and direct — "
+        "like Claude Code: 1-3 sentences max, no headers or bullet lists unless asked.\n\n"
+        "When the user sends a short or ambiguous message, interpret it in context of "
+        "the open conflicts below. For example if there is a conflict 'B or C?' and "
+        "the user says 'B', confirm you are resolving it as B and tell them the command "
+        "to run (e.g. `resolve <id> keep_a`). If input is truly unclear, ask one short "
+        "clarifying question.\n\n"
+        "When you resolve or act on something, clearly state what you did.\n\n"
+    )
+    if conflicts_text:
+        system += conflicts_text + "\n\n"
+    if facts_text:
+        system += facts_text + "\n\n"
+
+    messages: list[dict[str, str]] = list(history or [])
+    messages.append({"role": "user", "content": message})
+
+    import httpx
+
+    reply = ""
+    if anthropic_key:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": anthropic_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 256,
+                    "system": system,
+                    "messages": messages,
+                },
+            )
+            if resp.status_code != 200:
+                return {"error": f"Anthropic API error: {resp.status_code}"}
+            data = resp.json()
+            reply = (data.get("content") or [{}])[0].get("text", "").strip()
+    else:
+        async with httpx.AsyncClient(timeout=30) as client:
+            oa_messages = [{"role": "system", "content": system}] + messages
+            resp = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {openai_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o-mini",
+                    "max_tokens": 256,
+                    "messages": oa_messages,
+                },
+            )
+            if resp.status_code != 200:
+                return {"error": f"OpenAI API error: {resp.status_code}"}
+            data = resp.json()
+            reply = (
+                (data.get("choices") or [{}])[0].get("message", {}).get("content", "").strip()
+            )
+
+    return {"reply": reply}
+
+
 async def _tool_accept_terms(workspace_id: str, pool: Any) -> dict:
     """Record that the user has accepted the Engram terms of service."""
     async with _safe(pool) as conn:
@@ -1539,6 +1664,35 @@ _TOOLS = [
         "inputSchema": {"type": "object", "properties": {}, "required": []},
     },
     {
+        "name": "engram_chat",
+        "description": (
+            "Conversational interface to Engram's active memory. "
+            "Understands context from open conflicts and stored facts."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": {"type": "string", "description": "The user's message"},
+                "history": {
+                    "type": "array",
+                    "description": "Prior turns as [{role: user|assistant, content: str}]",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "role": {"type": "string"},
+                            "content": {"type": "string"},
+                        },
+                    },
+                },
+                "invite_key": {
+                    "type": "string",
+                    "description": "Your invite key (ek_live_...) for auth if not in headers",
+                },
+            },
+            "required": ["message"],
+        },
+    },
+    {
         "name": "engram_accept_terms",
         "description": (
             "Record that the user has accepted the Engram terms of service. "
@@ -1689,6 +1843,13 @@ async def _handle_message(msg: dict, workspace_id: str | None) -> dict | None:
                     result = await _tool_reset_invite_key(workspace_id, pool)
                 elif tool_name == "engram_accept_terms":
                     result = await _tool_accept_terms(workspace_id, pool)
+                elif tool_name == "engram_chat":
+                    result = await _tool_chat(
+                        workspace_id,
+                        pool,
+                        message=args["message"],
+                        history=args.get("history"),
+                    )
                 else:
                     return _err(msg_id, -32601, f"Unknown tool: {tool_name}")
 
