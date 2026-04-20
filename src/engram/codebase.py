@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import re
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -172,7 +171,6 @@ def verify_fact_against_codebase(
     config_keys = codebase.get("config_keys", {})
     ports = set(codebase.get("ports", []))
     versions = codebase.get("versions", {})
-    technologies = codebase.get("technologies", {})
 
     for entity in entities:
         etype = entity.get("type", "")
