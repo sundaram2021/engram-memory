@@ -541,21 +541,6 @@ class PostgresStorage(BaseStorage):
             )
             if existing:
                 return
-
-    async def conflict_exists(self, fact_a_id: str, fact_b_id: str, include_resolved: bool = False) -> bool:
-        status_filter = "" if include_resolved else "AND status = 'open'"
-        async with self.acquire() as conn:
-            row = await conn.fetchrow(
-                f"SELECT 1 FROM conflicts WHERE "
-                f"((fact_a_id = $1 AND fact_b_id = $2) OR (fact_a_id = $2 AND fact_b_id = $1)) "
-                f"AND workspace_id = $3 {status_filter}",
-                fact_a_id,
-                fact_b_id,
-                self.workspace_id,
-            )
-            if dismissed:
-                return
-
             await conn.execute(
                 f"INSERT INTO conflicts ({col_names}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",
                 *values,
