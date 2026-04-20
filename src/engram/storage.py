@@ -79,8 +79,8 @@ class BaseStorage(ABC):
         ...
 
     @abstractmethod
-    async def get_conflicting_fact_ids(self, fact_id: str) -> set[str]:
-        """Return all fact IDs that already have any conflict with fact_id."""
+    async def get_conflicting_fact_ids(self, fact_id: str, status: str = "open") -> set[str]:
+        """Return fact IDs that have conflicts with fact_id."""
         ...
 
     @abstractmethod
@@ -129,15 +129,7 @@ class BaseStorage(ABC):
     async def insert_conflict(self, conflict: dict[str, Any]) -> None: ...
 
     @abstractmethod
-    async def conflict_exists(
-        self, fact_a_id: str, fact_b_id: str, status: str | None = None
-    ) -> bool: ...
-
-    @abstractmethod
-    async def lineage_conflict_exists(self, lineage_a: str, lineage_b: str) -> bool:
-        """Return True if any resolved or dismissed conflict exists between facts
-        in lineage_a and facts in lineage_b (in either direction)."""
-        ...
+    async def conflict_exists(self, fact_a_id: str, fact_b_id: str, include_resolved: bool = False) -> bool: ...
 
     @abstractmethod
     async def get_conflicts(self, scope: str | None = None, status: str = "open") -> list[dict]: ...
@@ -887,12 +879,22 @@ class SQLiteStorage(BaseStorage):
         rows = await cursor.fetchall()
         return {row["id"]: dict(row) for row in rows}
 
-    async def get_conflicting_fact_ids(self, fact_id: str) -> set[str]:
-        """Return all fact IDs that already have any conflict (any status) with fact_id."""
+    async def get_conflicting_fact_ids(self, fact_id: str, status: str = "open") -> set[str]:
+        """Return fact IDs that have OPEN conflicts with fact_id.
+        
+        Args:
+            fact_id: The fact to check
+            status: Filter by status - "open", "resolved", "dismissed", or "all" (default: "open")
+        """
+        if status == "all":
+            status_filter = ""
+        else:
+            status_filter = f"AND status = '{status}'"
         cursor = await self.db.execute(
-            """SELECT fact_a_id, fact_b_id FROM conflicts
+            f"""SELECT fact_a_id, fact_b_id FROM conflicts
                WHERE workspace_id = ?
-                 AND (fact_a_id = ? OR fact_b_id = ?)""",
+                 AND (fact_a_id = ? OR fact_b_id = ?)
+                 {status_filter}""",
             (self.workspace_id, fact_id, fact_id),
         )
         rows = await cursor.fetchall()
@@ -1070,48 +1072,25 @@ class SQLiteStorage(BaseStorage):
         )
         await self.db.commit()
 
-    async def conflict_exists(
-        self, fact_a_id: str, fact_b_id: str, status: str | None = None
-    ) -> bool:
-        """Check if a conflict already exists between two facts (in either order) within this workspace.
-
-        Defaults to checking all statuses so resolved/dismissed conflicts block re-detection.
-
+    async def conflict_exists(self, fact_a_id: str, fact_b_id: str, include_resolved: bool = False) -> bool:
+        """Check if an OPEN conflict already exists between two facts.
+        
         Args:
             fact_a_id: First fact ID
             fact_b_id: Second fact ID
-            status: Filter by status. None (default) checks all statuses.
+            include_resolved: If True, also check resolved/dismissed conflicts (default: False)
         """
-        conditions = [
-            "workspace_id = ?",
-            "((fact_a_id = ? AND fact_b_id = ?) OR (fact_a_id = ? AND fact_b_id = ?))",
-        ]
-        params: list[Any] = [self.workspace_id, fact_a_id, fact_b_id, fact_b_id, fact_a_id]
-
-        if status is not None:
-            conditions.append("status = ?")
-            params.append(status)
-
+        if include_resolved:
+            status_filter = ""
+        else:
+            status_filter = "AND status = 'open'"
         cursor = await self.db.execute(
-            f"SELECT 1 FROM conflicts WHERE {' AND '.join(conditions)}", params
-        )
-        return await cursor.fetchone() is not None
-
-    async def lineage_conflict_exists(self, lineage_a: str, lineage_b: str) -> bool:
-        """Return True if a resolved or dismissed conflict exists between any fact
-        in lineage_a and any fact in lineage_b (prevents re-detection after resolution)."""
-        cursor = await self.db.execute(
-            """SELECT 1 FROM conflicts c
-               JOIN facts fa ON c.fact_a_id = fa.id
-               JOIN facts fb ON c.fact_b_id = fb.id
-               WHERE c.workspace_id = ?
-                 AND c.status IN ('resolved', 'dismissed')
-                 AND (
-                   (fa.lineage_id = ? AND fb.lineage_id = ?)
-                   OR (fa.lineage_id = ? AND fb.lineage_id = ?)
-                 )
-               LIMIT 1""",
-            (self.workspace_id, lineage_a, lineage_b, lineage_b, lineage_a),
+            f"""SELECT 1 FROM conflicts
+               WHERE workspace_id = ?
+                 AND ((fact_a_id = ? AND fact_b_id = ?)
+                  OR  (fact_a_id = ? AND fact_b_id = ?))
+                 {status_filter}""",
+            (self.workspace_id, fact_a_id, fact_b_id, fact_b_id, fact_a_id),
         )
         return await cursor.fetchone() is not None
 
