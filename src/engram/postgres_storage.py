@@ -357,12 +357,16 @@ class PostgresStorage(BaseStorage):
             )
         return {r["id"]: _row_to_dict(r) for r in rows}
 
-    async def get_conflicting_fact_ids(self, fact_id: str) -> set[str]:
-        """Return all fact IDs that already have any conflict (any status) with fact_id."""
-        async with self.acquire() as conn:
+    async def get_conflicting_fact_ids(self, fact_id: str, status: str = "open") -> set[str]:
+        """Return fact IDs that have OPEN conflicts with fact_id."""
+        if status == "all":
+            status_filter = ""
+        else:
+            status_filter = f"AND status = '{status}'"
+        async with self.pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT fact_a_id, fact_b_id FROM conflicts "
-                "WHERE workspace_id = $1 AND (fact_a_id = $2 OR fact_b_id = $2)",
+                f"SELECT fact_a_id, fact_b_id FROM conflicts "
+                f"WHERE workspace_id = $1 AND (fact_a_id = $2 OR fact_b_id = $2) {status_filter}",
                 self.workspace_id,
                 fact_id,
             )
@@ -537,17 +541,6 @@ class PostgresStorage(BaseStorage):
             )
             if existing:
                 return
-
-            dismissed = await conn.fetchrow(
-                """SELECT 1 FROM dismissed_conflicts
-                   WHERE conflict_id = $1 AND workspace_id = $2
-                   LIMIT 1""",
-                conflict.get("id"),
-                self.workspace_id,
-            )
-            if dismissed:
-                return
-
             await conn.execute(
                 f"INSERT INTO conflicts ({col_names}) VALUES ({placeholders}) ON CONFLICT DO NOTHING",
                 *values,
