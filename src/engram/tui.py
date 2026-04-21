@@ -462,40 +462,61 @@ def _resolve_conflict(
 
     winning_claim_id: str | None = None
     if resolution_type.lower() in ("keep_a", "keep_b"):
-        data = _http_get(f"{base}/api/conflicts?status=open")
-        if isinstance(data, list):
-            for c in data:
-                cid = c.get("conflict_id") or c.get("id") or ""
-                if cid.startswith(conflict_id):
-                    if resolution_type.lower() == "keep_a":
-                        fa = c.get("fact_a") or {}
-                        winning_claim_id = fa.get("fact_id") or fa.get("id") or c.get("fact_a_id")
-                    else:
-                        fb = c.get("fact_b") or {}
-                        winning_claim_id = fb.get("fact_id") or fb.get("id") or c.get("fact_b_id")
-                    conflict_id = cid
-                    break
+        if _is_hosted(ws):
+            raw = _mcp_call(ws, "engram_conflicts", {"status": "open"})
+            conflicts_list = (
+                raw.get("conflicts", [])
+                if isinstance(raw, dict)
+                else (raw if isinstance(raw, list) else [])
+            )
+        else:
+            auth_headers: dict[str, str] = {}
+            if ws and getattr(ws, "invite_key", ""):
+                auth_headers["Authorization"] = f"Bearer {ws.invite_key}"
+            data = _http_get(f"{base}/api/conflicts?status=open", headers=auth_headers)
+            conflicts_list = data if isinstance(data, list) else []
+        for c in conflicts_list:
+            cid = c.get("conflict_id") or c.get("id") or ""
+            if cid.startswith(conflict_id):
+                if resolution_type.lower() == "keep_a":
+                    fa = c.get("fact_a") or {}
+                    winning_claim_id = fa.get("fact_id") or fa.get("id") or c.get("fact_a_id")
+                else:
+                    fb = c.get("fact_b") or {}
+                    winning_claim_id = fb.get("fact_id") or fb.get("id") or c.get("fact_b_id")
+                conflict_id = cid
+                break
 
     note = f"Resolved via TUI ({resolution_type})"
-    payload: dict[str, Any] = {
+    mcp_payload: dict[str, Any] = {
         "conflict_id": conflict_id,
         "resolution_type": resolution_type_norm,
         "resolution": note,
     }
     if winning_claim_id:
-        payload["winning_claim_id"] = winning_claim_id
+        mcp_payload["winning_claim_id"] = winning_claim_id
 
-    status, result = _http_post(f"{base}/api/resolve", payload)
-
-    if status == 0:
-        output_lines.append(("class:output.dim", "  (server offline — using local engine)\n"))
-        _run_engram_command("resolve", f"{conflict_id} {resolution_type_norm} {note}", output_lines)
-        return
-
-    if status != 200:
-        err = result.get("error") or result.get("detail") or f"HTTP {status}"
-        output_lines.append(("class:output.error", f"  Resolve failed: {err}\n"))
-        return
+    if _is_hosted(ws):
+        result = _mcp_call(ws, "engram_resolve", mcp_payload)
+        if result is None:
+            output_lines.append(
+                ("class:output.error", "  Resolve failed: could not reach server.\n")
+            )
+            return
+    else:
+        http_status, result = _http_post(f"{base}/api/resolve", mcp_payload)
+        if http_status == 0:
+            output_lines.append(("class:output.dim", "  (server offline — using local engine)\n"))
+            _run_engram_command(
+                "resolve", f"{conflict_id} {resolution_type_norm} {note}", output_lines
+            )
+            return
+        if http_status != 200:
+            err = (
+                (result or {}).get("error") or (result or {}).get("detail") or f"HTTP {http_status}"
+            )
+            output_lines.append(("class:output.error", f"  Resolve failed: {err}\n"))
+            return
 
     output_lines.append(
         ("class:output.label", f"  ✓ Conflict {conflict_id[:8]} resolved ({resolution_type}).\n")
