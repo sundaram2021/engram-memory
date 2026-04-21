@@ -14,8 +14,8 @@ def _render_landing() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Engram — Shared Memory for Your AI Agents</title>
-  <meta name="description" content="Engram is a shared memory ledger for your team. When one agent learns a fact, every other agent knows it instantly. If they contradict each other, Engram catches it before they break your code.">
+  <title>Engram — Agent Memory</title>
+  <meta name="description" content="Engram is Git for AI memory. It syncs knowledge across agents instantly and flags logic conflicts before they ship.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" onload="this.onload=null;this.rel='stylesheet'">
@@ -593,9 +593,9 @@ def _render_landing() -> str:
 <section class="hero">
   <div class="container">
     <div class="hero-badge"><span class="hero-badge-dot"></span>MCP-compatible · Open source</div>
-    <h1>Shared Memory for Your AI Agents.</h1>
+    <h1>Agent Memory.</h1>
     <p class="subtitle">
-      Engram is "Git for AI memory." It syncs knowledge across agents instantly and flags logic conflicts before they ship. By anchoring every decision to a verified fact, it creates a permanent audit trail that connects agent output to human responsibility.
+      Engram is "Git for AI memory." It syncs knowledge across agents instantly and flags logic conflicts before they ship.
     </p>
     <a href="#install" class="hero-cta">
       Get started

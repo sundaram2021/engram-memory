@@ -1647,9 +1647,7 @@ class EngramEngine:
                             try:
                                 self._suggestion_queue.put_nowait(cid)
                             except asyncio.QueueFull:
-                                await self._apply_heuristic_resolution(
-                                    cid, first_fact or {}, fact
-                                )
+                                await self._apply_heuristic_resolution(cid, first_fact or {}, fact)
                         await self._fire_event(
                             "conflict.detected",
                             {
@@ -2444,9 +2442,7 @@ class EngramEngine:
             resolution_text = suggestion.get("suggested_resolution", "Auto-resolved by Engram.")
 
             if resolution_type == "winner" and winning_id:
-                loser_id = (
-                    fact_b["id"] if winning_id == fact_a["id"] else fact_a["id"]
-                )
+                loser_id = fact_b["id"] if winning_id == fact_a["id"] else fact_a["id"]
                 await self.storage.close_validity_window(fact_id=loser_id)
 
             elif resolution_type == "merge":
@@ -2479,9 +2475,7 @@ class EngramEngine:
                 )
             except Exception:
                 logger.debug("Failed to commit resolution fact for %s", conflict_id[:12])
-            logger.info(
-                "LLM-resolved conflict %s as %s", conflict_id[:12], resolution_type
-            )
+            logger.info("LLM-resolved conflict %s as %s", conflict_id[:12], resolution_type)
         else:
             # No LLM available — fall back to heuristic
             await self._apply_heuristic_resolution(conflict_id, fact_a, fact_b)

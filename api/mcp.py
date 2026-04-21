@@ -1307,6 +1307,44 @@ async def _tool_resolve(
                 )
                 await conn.execute("UPDATE facts SET valid_until = $1 WHERE id = $2", now, loser)
 
+        # Record resolution as a queryable fact so agents can see resolve history
+        conflict_row = await conn.fetchrow(
+            "SELECT explanation, fact_a_content, fact_b_content, scope FROM conflicts WHERE id = $1",
+            conflict_id,
+        )
+        if conflict_row:
+            explanation = conflict_row["explanation"] or "Conflicting information"
+            fact_a_content = (conflict_row["fact_a_content"] or "")[:150]
+            fact_b_content = (conflict_row["fact_b_content"] or "")[:150]
+            resolution_fact = (
+                f"[Conflict Resolved] {explanation} — "
+                f"Resolution ({resolution_type}): {resolution} "
+                f"| Fact A: {fact_a_content} "
+                f"| Fact B: {fact_b_content}"
+            )
+            res_fact_id = str(uuid.uuid4())
+            res_lineage_id = str(uuid.uuid4())
+            content_hash = hashlib.sha256(resolution_fact.encode()).hexdigest()[:16]
+            await conn.execute(
+                """INSERT INTO facts
+                   (id, lineage_id, content, content_hash, scope, confidence, fact_type,
+                    agent_id, committed_at, valid_from, valid_until, memory_op,
+                    supersedes_fact_id, workspace_id, durability)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9,NULL,$10,NULL,$11,$12)""",
+                res_fact_id,
+                res_lineage_id,
+                resolution_fact,
+                content_hash,
+                conflict_row["scope"] or "general",
+                1.0,
+                "decision",
+                "engram-resolver",
+                now,
+                "add",
+                workspace_id,
+                "durable",
+            )
+
     return {"status": "resolved", "conflict_id": conflict_id, "resolution_type": resolution_type}
 
 
