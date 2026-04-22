@@ -37,10 +37,10 @@ async def test_direct_numeric_contradiction_raises_conflict(engine: EngramEngine
     await engine._detection_queue.join()
     await engine._suggestion_queue.join()
 
-    # Conflict is auto-resolved (no open conflicts remain); verify detection occurred
-    conflicts = await engine.get_conflicts(scope="conflicts", status="resolved")
+    # Cross-agent contradictions are expected to remain open (genuine conflict).
+    conflicts = await engine.get_conflicts(scope="conflicts", status="open")
     assert len(conflicts) >= 1
-    assert any(c["detection_tier"] in ("tier0_entity", "tier2_numeric") for c in conflicts)
+    assert any(c["detection_tier"] in ("tier2_numeric", "tier1_nli") for c in conflicts)
 
 
 # ── Same entity, different value ─────────────────────────────────────
@@ -65,11 +65,11 @@ async def test_same_entity_different_value_produces_conflict(engine: EngramEngin
     await engine._detection_queue.join()
     await engine._suggestion_queue.join()
 
-    # Conflict is auto-resolved; verify detection occurred
-    conflicts = await engine.get_conflicts(scope="conflicts", status="resolved")
+    # Cross-agent contradictions are expected to remain open (genuine conflict).
+    conflicts = await engine.get_conflicts(scope="conflicts", status="open")
     assert len(conflicts) >= 1
     tiers = {c["detection_tier"] for c in conflicts}
-    assert tiers & {"tier0_entity", "tier2_numeric", "tier1_nli"}
+    assert tiers & {"tier2_numeric", "tier1_nli"}
 
 
 @pytest.mark.asyncio
@@ -93,8 +93,8 @@ async def test_conflict_classification_is_high_severity_for_cross_agent(engine: 
     await engine._detection_queue.join()
     await engine._suggestion_queue.join()
 
-    # Conflict is auto-resolved; verify severity of detected conflict
-    conflicts = await engine.get_conflicts(scope="conflicts-severity", status="resolved")
+    # Cross-agent contradictions are expected to remain open (genuine conflict).
+    conflicts = await engine.get_conflicts(scope="conflicts-severity", status="open")
     assert len(conflicts) >= 1
     assert any(c["severity"] == "high" for c in conflicts)
 
@@ -115,7 +115,7 @@ async def test_conflict_auto_resolved_picks_winner(engine: EngramEngine, storage
         content="Cache TTL is 600 seconds",
         scope="conflicts-resolve",
         confidence=0.9,
-        agent_id="agent-b",
+        agent_id="agent-a",
     )
 
     await engine._detection_queue.join()
@@ -194,16 +194,25 @@ async def test_dismissed_conflict_stays_hidden_after_refresh(
     await engine._detection_queue.join()
     await engine._suggestion_queue.join()
 
-    # Conflict is auto-resolved; verify no open conflicts remain
+    # Dismiss the detected conflict and ensure it stays out of the open view.
     open_conflicts = await engine.get_conflicts(scope="conflicts-refresh", status="open")
-    assert len(open_conflicts) == 0
+    assert len(open_conflicts) >= 1
+    cid = open_conflicts[0]["conflict_id"]
+    await engine.resolve(cid, resolution_type="dismissed", resolution="false positive")
 
-    resolved = await engine.get_conflicts(scope="conflicts-refresh", status="resolved")
-    assert len(resolved) >= 1
+    # Re-run detection for any queued/related facts; dismissed conflicts should not reappear as open.
+    for c in open_conflicts:
+        await engine._schedule_conflict_detection(
+            c["fact_a"]["fact_id"], source="test_refresh", timeout_seconds=0.0
+        )
+        await engine._schedule_conflict_detection(
+            c["fact_b"]["fact_id"], source="test_refresh", timeout_seconds=0.0
+        )
 
-    # Winning fact stays active; engine won't re-detect the same resolved pair
+    dismissed = await engine.get_conflicts(scope="conflicts-refresh", status="dismissed")
+    assert any(c["conflict_id"] == cid for c in dismissed)
     open_after = await engine.get_conflicts(scope="conflicts-refresh", status="open")
-    assert len(open_after) == 0
+    assert all(c["conflict_id"] != cid for c in open_after)
 
 
 # ── conflict_type classification ─────────────────────────────────────
@@ -284,8 +293,8 @@ async def test_cross_agent_conflict_classified_as_genuine(engine: EngramEngine):
 
     await engine._suggestion_queue.join()
 
-    # Genuine conflicts are auto-resolved; check resolved status
-    conflicts = await engine.get_conflicts(scope="conflicts-genuine", status="resolved")
+    # Cross-agent contradictions are expected to remain open (genuine conflict).
+    conflicts = await engine.get_conflicts(scope="conflicts-genuine", status="open")
     assert len(conflicts) >= 1
     assert any(c["conflict_type"] == "genuine" for c in conflicts)
 
