@@ -821,21 +821,13 @@ def _render_dashboard() -> str:
       <button class="btn-sm btn-primary" onclick="startCheckout()">Add payment method</button>
     </div>
 
-    <div class="stats-row" id="stats-row"></div>
-
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab('conflicts', event)">Conflicts <span id="conflict-badge"></span></button>
-      <button class="tab-btn" onclick="switchTab('facts', event)">Facts</button>
+      <button class="tab-btn active" onclick="switchTab('facts', event)">Facts</button>
       <button class="tab-btn" onclick="switchTab('billing', event)">Billing</button>
     </div>
 
-    <!-- Conflicts -->
-    <div class="tab-panel active" id="panel-conflicts">
-      <div class="conflict-list" id="conflict-list"></div>
-    </div>
-
     <!-- Facts -->
-    <div class="tab-panel" id="panel-facts">
+    <div class="tab-panel active" id="panel-facts">
       <div class="facts-toolbar">
         <input class="facts-search" id="facts-search" placeholder="Search facts…" oninput="filterFacts()" />
         <button class="filter-btn active" onclick="setFactFilter('all', this)">All</button>
@@ -1509,7 +1501,7 @@ async function openWorkspace(engram_id, initialTab) {
     const tabBtns = document.querySelectorAll('.tab-btn');
     tabBtns.forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    const idx = ['conflicts','facts','billing'].indexOf(initialTab);
+    const idx = ['facts','billing'].indexOf(initialTab);
     if (idx >= 0 && tabBtns[idx]) tabBtns[idx].classList.add('active');
     const panelEl = document.getElementById('panel-' + initialTab);
     if (panelEl) panelEl.classList.add('active');
@@ -1583,13 +1575,12 @@ async function loadWorkspaceData(engram_id) {
 
 function showInviteKeyPrompt(engram_id) {
   // Workspace not yet linked to this account — show a clear connect prompt
-  document.getElementById('stats-row').innerHTML = '';
   document.querySelectorAll('.tab-panel').forEach(p => {
     p.classList.remove('active');
     p.innerHTML = '';
   });
   document.querySelector('.tabs').style.display = 'none';
-  document.getElementById('panel-conflicts').innerHTML = `
+  document.getElementById('panel-facts').innerHTML = `
     <div style="padding:64px 0;text-align:center;color:var(--t2)">
       <div style="font-size:18px;font-weight:700;color:var(--t1);margin-bottom:10px">
         Connect this workspace to your account
@@ -1606,7 +1597,7 @@ function showInviteKeyPrompt(engram_id) {
       </div>
       <div id="quick-key-err" style="color:var(--red);font-size:13px;margin-top:12px;display:none"></div>
     </div>`;
-  document.getElementById('panel-conflicts').classList.add('active');
+  document.getElementById('panel-facts').classList.add('active');
 }
 
 async function loadWithKey(engram_id) {
@@ -1644,7 +1635,6 @@ async function loadWithKey(engram_id) {
       p.classList.remove('active');
     });
     // Rebuild panel content (was cleared by showInviteKeyPrompt)
-    document.getElementById('panel-conflicts').innerHTML = '<div class="conflict-list" id="conflict-list"></div>';
     document.getElementById('panel-facts').innerHTML = `
       <div class="facts-toolbar">
         <input class="facts-search" id="facts-search" placeholder="Search facts…" oninput="filterFacts()" />
@@ -1657,7 +1647,7 @@ async function loadWithKey(engram_id) {
         <div id="facts-list"></div>
       </div>`;
     document.getElementById('panel-billing').innerHTML = '<div class="billing-section" id="billing-section"></div>';
-    document.getElementById('panel-conflicts').classList.add('active');
+    document.getElementById('panel-facts').classList.add('active');
     // Refresh session workspaces so the list shows the newly linked workspace
     const meR = await fetch('/auth/me', { credentials: 'include' });
     if (meR.ok) SESSION = await meR.json();
@@ -1677,45 +1667,6 @@ function goBackToList() {
 // ── Detail render ───────────────────────────────────────────────────
 function renderDetail() {
   if (!WS_DATA) return;
-  const { facts, conflicts, agents } = WS_DATA;
-  // Deduplicate by fact pair before counting, same as renderConflicts.
-  const pairSeen = new Set();
-  const openC = (conflicts||[]).filter(c => {
-    if (c.status !== 'open') return false;
-    const key = [c.fact_a_id, c.fact_b_id].sort().join('|');
-    if (pairSeen.has(key)) return false;
-    pairSeen.add(key);
-    return true;
-  }).length;
-
-  if (openC > 0) {
-    document.getElementById('stats-row').innerHTML = `
-      <div class="conflict-indicator">
-        <span class="conflict-count" data-target="${openC}">0</span>
-        <span class="conflict-label">open confusion${openC !== 1 ? 's' : ''}</span>
-      </div>`;
-    // Animate counter
-    const el = document.querySelector('.conflict-count[data-target]');
-    if (el) {
-      const target = parseInt(el.dataset.target);
-      const duration = 600;
-      const start = performance.now();
-      function tick(now) {
-        const p = Math.min((now - start) / duration, 1);
-        const ease = 1 - Math.pow(1 - p, 3);
-        el.textContent = Math.round(target * ease);
-        if (p < 1) requestAnimationFrame(tick);
-      }
-      requestAnimationFrame(tick);
-    }
-  } else {
-    document.getElementById('stats-row').innerHTML = '';
-  }
-
-  const badge = document.getElementById('conflict-badge');
-  badge.textContent = openC > 0 ? '(' + openC + ')' : '';
-
-  renderConflicts();
   renderFacts();
 }
 
@@ -1990,108 +1941,6 @@ function filterGraph(q) {
     }
   });
   cy.edges().addClass('dimmed');
-}
-
-// ── Conflicts ───────────────────────────────────────────────────────
-function renderConflicts() {
-  if (!WS_DATA) return;
-  const { conflicts, facts } = WS_DATA;
-  const el = document.getElementById('conflict-list');
-
-  // Deduplicate by fact pair — keep one per (fact_a_id, fact_b_id), preferring open over resolved.
-  const pairMap = new Map();
-  for (const c of conflicts) {
-    const key = [c.fact_a_id, c.fact_b_id].sort().join('|');
-    const existing = pairMap.get(key);
-    if (!existing || (c.status === 'open' && existing.status !== 'open')) {
-      pairMap.set(key, c);
-    }
-  }
-  const deduped = [...pairMap.values()];
-  const openConflicts = deduped.filter(c => c.status === 'open');
-
-  if (!openConflicts.length) { el.innerHTML = '<div class="empty-state">No confusions detected — your agents are aligned.</div>'; return; }
-  const factMap = {};
-  (facts||[]).forEach(f => factMap[f.id] = f);
-  const sorted = [...openConflicts].sort((a,b) => new Date(b.detected_at) - new Date(a.detected_at));
-  el.innerHTML = sorted.map(c => {
-    const fa = factMap[c.fact_a_id], fb = factMap[c.fact_b_id];
-    const isOpen = c.status === 'open';
-    const ts = c.detected_at ? new Date(c.detected_at).toLocaleString() : '';
-    const faContent = fa ? fa.content : (c.fact_a_content || 'Fact not found');
-    const fbContent = fb ? fb.content : (c.fact_b_content || 'Fact not found');
-    const faScope = fa ? fa.scope : (c.fact_a_scope || '?');
-    const fbScope = fb ? fb.scope : (c.fact_b_scope || '?');
-    const faTime = fa && fa.committed_at ? new Date(fa.committed_at).toLocaleString() : '';
-    const fbTime = fb && fb.committed_at ? new Date(fb.committed_at).toLocaleString() : '';
-    return `<div class="conflict-card${isOpen ? '' : ' resolved'}">
-      <div class="conflict-question">${c.explanation ? esc(c.explanation) : 'Conflicting information detected'}</div>
-      ${isOpen ? `<div class="conflict-actions">
-        <button class="btn-yes" onclick="resolveConflict('${c.id}','keep_a')">Keep fact A</button>
-        <button class="btn-yes" onclick="resolveConflict('${c.id}','keep_b')" style="background:rgba(96,165,250,0.1);border-color:rgba(96,165,250,0.2);color:#60a5fa;">Keep fact B</button>
-        <button class="btn-no" onclick="resolveConflict('${c.id}','dismiss')">Dismiss</button>
-      </div>` : `<div class="conflict-resolved-note">Resolved · ${c.resolution_type || 'dismissed'}</div>`}
-      <details class="conflict-details">
-        <summary>View details</summary>
-        <div class="conflict-facts">
-          <div class="conflict-fact"><div class="conflict-fact-label">Fact A · ${esc(faScope)}${faTime ? ' · ' + faTime : ''}</div>${esc(faContent)}</div>
-          <div class="conflict-fact"><div class="conflict-fact-label">Fact B · ${esc(fbScope)}${fbTime ? ' · ' + fbTime : ''}</div>${esc(fbContent)}</div>
-        </div>
-        <div class="conflict-date">Detected ${ts}</div>
-      </details>
-    </div>`;
-  }).join('');
-}
-
-async function resolveConflict(conflictId, answer) {
-  if (!CURRENT_WS) return;
-  let resolution_type, resolution, winning_claim_id;
-  if (answer === 'keep_a') {
-    resolution_type = 'winner';
-    resolution = 'Fact A kept as correct via dashboard';
-    const c = WS_DATA && WS_DATA.conflicts.find(x => x.id === conflictId);
-    winning_claim_id = c ? c.fact_a_id : undefined;
-  } else if (answer === 'keep_b') {
-    resolution_type = 'winner';
-    resolution = 'Fact B kept as correct via dashboard';
-    const c = WS_DATA && WS_DATA.conflicts.find(x => x.id === conflictId);
-    winning_claim_id = c ? c.fact_b_id : undefined;
-  } else {
-    resolution_type = 'dismissed';
-    resolution = 'Dismissed as false positive via dashboard';
-  }
-  try {
-    const args = { conflict_id: conflictId, resolution_type, resolution };
-    if (winning_claim_id) args.winning_claim_id = winning_claim_id;
-    await fetch('/mcp', {
-      method: 'POST', credentials: 'include',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        jsonrpc: '2.0', id: Date.now(), method: 'tools/call',
-        params: { name: 'engram_resolve', arguments: args }
-      })
-    });
-    // Mark all conflicts with the same fact pair as resolved locally.
-    if (WS_DATA) {
-      const resolved = WS_DATA.conflicts.find(x => x.id === conflictId);
-      if (resolved) {
-        const pairKey = [resolved.fact_a_id, resolved.fact_b_id].sort().join('|');
-        if (resolution_type === 'dismissed') {
-          WS_DATA.conflicts = WS_DATA.conflicts.filter(x => {
-            const k = [x.fact_a_id, x.fact_b_id].sort().join('|');
-            return k !== pairKey;
-          });
-        } else {
-          WS_DATA.conflicts.forEach(x => {
-            const k = [x.fact_a_id, x.fact_b_id].sort().join('|');
-            if (k === pairKey) { x.status = 'resolved'; x.resolution_type = resolution_type; }
-          });
-        }
-      }
-    }
-    renderConflicts();
-    renderDetail();
-  } catch(e) { console.error('Resolve failed:', e); }
 }
 
 // ── Facts ────────────────────────────────────────────────────────────
