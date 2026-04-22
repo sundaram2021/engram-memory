@@ -2454,11 +2454,105 @@ class EngramEngine:
         except asyncio.CancelledError:
             pass
 
+    def _build_codebase_context(
+        self,
+        fact_a: dict[str, Any],
+        fact_b: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        """Return codebase ground-truth entries relevant to the disputed entities.
+
+        Checks config keys, ports, and dependency versions from the last codebase
+        scan against the entities extracted from both facts. A match tells the LLM
+        what the code *actually* says about the disputed value.
+        """
+        if not self._codebase_snapshot:
+            return []
+
+        snapshot = self._codebase_snapshot
+        config_keys = snapshot.get("config_keys", {})
+        versions = snapshot.get("versions", {})
+        ports: set[int] = set(snapshot.get("ports", []))
+
+        entities_a = _load_entities(fact_a.get("entities"))
+        entities_b = _load_entities(fact_b.get("entities"))
+
+        # Prioritise entities that appear in *both* facts — those are genuinely disputed.
+        names_a = {e["name"] for e in entities_a}
+        names_b = {e["name"] for e in entities_b}
+        disputed = names_a & names_b or names_a | names_b
+
+        findings: list[dict[str, str]] = []
+        seen: set[str] = set()
+
+        for entity in entities_a + entities_b:
+            name = entity["name"]
+            if name not in disputed or name in seen:
+                continue
+            seen.add(name)
+            etype = entity.get("type", "")
+
+            if etype == "config_key" and name in config_keys:
+                code_val = config_keys[name]
+                if code_val != "<redacted>":
+                    findings.append(
+                        {"entity": name, "code_value": code_val, "source": "config / .env"}
+                    )
+
+            pkg = name.replace("_version", "")
+            if pkg in versions:
+                findings.append(
+                    {"entity": name, "code_value": versions[pkg], "source": "dependency files"}
+                )
+
+            if etype == "numeric" and name == "port" and ports:
+                findings.append(
+                    {
+                        "entity": "port",
+                        "code_value": ", ".join(str(p) for p in sorted(ports)),
+                        "source": "config / Dockerfile",
+                    }
+                )
+
+        return findings
+
+    async def _build_tkg_context(
+        self,
+        fact_a: dict[str, Any],
+        fact_b: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Return TKG belief histories for the entities involved in the conflict.
+
+        Surfaces how beliefs about each entity evolved over time — which agents
+        held which values, when they changed, and whether any active reversal
+        patterns exist. Capped at 3 entities to keep latency low.
+        """
+        entities_a = _load_entities(fact_a.get("entities"))
+        entities_b = _load_entities(fact_b.get("entities"))
+
+        names_a = {e["name"] for e in entities_a}
+        names_b = {e["name"] for e in entities_b}
+        # Disputed entities first, then any remaining, capped at 3
+        disputed = list(names_a & names_b)
+        others = list((names_a | names_b) - set(disputed))
+        candidate_names = (disputed + others)[:3]
+
+        histories: list[dict[str, Any]] = []
+        for name in candidate_names:
+            try:
+                timeline = await self.tkg.get_entity_timeline(name)
+                if timeline:
+                    histories.append({"entity": name, "timeline": timeline})
+            except Exception:
+                logger.debug("TKG timeline unavailable for entity %s", name)
+
+        return histories
+
     async def _resolve_intelligently(self, conflict_id: str) -> None:
         """Resolve a conflict automatically: LLM when available, heuristic otherwise.
 
         With ANTHROPIC_API_KEY set, Claude picks winner/merge/dismissed and explains
-        why. Without it, the higher-confidence (or more recent) fact wins.
+        why, grounded in codebase ground truth and TKG belief history. Without it,
+        the higher-confidence (or more recent) fact wins.
         """
         from engram import suggester
 
@@ -2474,7 +2568,17 @@ class EngramEngine:
         if not fact_a or not fact_b:
             return
 
-        suggestion = await suggester.generate_suggestion(fact_a, fact_b, conflict)
+        # Gather codebase ground truth and TKG belief history to ground the resolution
+        codebase_context = self._build_codebase_context(fact_a, fact_b)
+        tkg_context = await self._build_tkg_context(fact_a, fact_b)
+
+        suggestion = await suggester.generate_suggestion(
+            fact_a,
+            fact_b,
+            conflict,
+            codebase_context=codebase_context,
+            tkg_context=tkg_context,
+        )
 
         if suggestion:
             resolution_type = suggestion["suggested_resolution_type"]
