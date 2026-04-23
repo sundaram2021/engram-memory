@@ -142,6 +142,8 @@ Framework integrations:
 - [OpenAI Agents SDK](./docs/integrations/openai-agents.md)
 - [open-multi-agent](https://github.com/JackChen-me/open-multi-agent) — TypeScript multi-agent orchestration engine.
 
+> **Try open-multi-agent** — If you're building multi-agent teams in TypeScript, [open-multi-agent](https://github.com/JackChen-me/open-multi-agent) is the easiest way to get started. One `runTeam()` call, three runtime dependencies, multi-model support. Pairs naturally with Engram for shared memory across your agent team.
+
 ---
 
 ## CLI Reference
