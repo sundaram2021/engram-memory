@@ -55,7 +55,7 @@ function Write-JsonFile {
     [System.IO.File]::WriteAllText($FilePath, $json, $encoding)
 }
 
-# ── Install engram CLI ─────────────────────────────────────────────
+# --- Install engram CLI ---
 Write-Host "`nInstalling engram CLI..."
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
@@ -71,7 +71,7 @@ try {
     if ($env:PATH -notlike "*$uvBin*") {
         $env:PATH = "$uvBin;$env:PATH"
     }
-    Write-Host "  ✓ engram CLI installed"
+    Write-Host "  OK engram CLI installed"
 
     # Write credentials so the auto-commit hook can reach the server
     $credDir = "$env:USERPROFILE\.engram"
@@ -81,13 +81,16 @@ try {
     [System.IO.File]::WriteAllText("$credDir\credentials", $credContent)
 
     # Wire up auto-commit hooks for all detected IDEs
-    try { engram install 2>$null; Write-Host "  ✓ auto-commit hooks installed" } catch {}
+    try {
+        engram install 2>$null
+        Write-Host "  OK auto-commit hooks installed"
+    } catch {}
 } catch {
-    Write-Host "  ! CLI install failed — run manually: uv tool install engram-team"
+    Write-Host "  ! CLI install failed - run manually: uv tool install engram-team"
 }
 
 
-# ── Per-IDE JSON patchers ──────────────────────────────────────────
+# --- Per-IDE JSON patchers ---
 
 function Patch-McpServersUrl {  # Cursor, Kiro, Trae, Amazon Q
     param([string]$f)
@@ -174,7 +177,7 @@ function Patch-OpenCode {  # {mcp: {engram: {type: "remote", url}}}
     Write-JsonFile $c $f
 }
 
-# ── Detect and patch MCP clients ──────────────────────────────────
+# --- Detect and patch MCP clients ---
 Write-Host "`nDetecting MCP clients..."
 $patched = 0
 
@@ -252,7 +255,7 @@ if (Test-Path "$env:USERPROFILE\.config\opencode") {
     $patched++
 }
 
-# ── Install Claude Code skill (global, all sessions) ───────────────
+# --- Install Claude Code skill (global, all sessions) ---
 $SkillDir = "$env:USERPROFILE\.claude\skills"
 $SkillFile = "$SkillDir\set-up-engram-for-my-team.md"
 if (-not (Test-Path $SkillDir)) { New-Item -ItemType Directory -Force -Path $SkillDir | Out-Null }
@@ -261,18 +264,18 @@ if (-not (Test-Path $SkillDir)) { New-Item -ItemType Directory -Force -Path $Ski
 
 Guide the user through configuring the Engram MCP server in their IDE.
 
-## CRITICAL — Correct MCP URL
+## CRITICAL - Correct MCP URL
 
 The ONLY correct Engram MCP endpoint is:
 
     https://www.engram-memory.com/mcp
 
-DO NOT invent subdomains like mcp.engram-memory.com or mcp.engram.app — they do not exist.
+DO NOT invent subdomains like mcp.engram-memory.com or mcp.engram.app - they do not exist.
 DO NOT omit the www prefix. Always use exactly:
 
     https://www.engram-memory.com/mcp
 
-## Step 1 — Check existing config and auto-fix wrong URLs
+## Step 1 - Check existing config and auto-fix wrong URLs
 
 Read ~/.claude.json and .mcp.json (if they exist). If either contains an "engram"
 entry under mcpServers with a WRONG url (anything other than https://www.engram-memory.com/mcp,
@@ -281,28 +284,28 @@ corrected it.
 
 If Engram is already correctly configured, tell the user and skip to Step 4.
 
-## Step 2 — Ask two questions in a single AskUserQuestion call
+## Step 2 - Ask two questions in a single AskUserQuestion call
 
-**Question 1 — header: "Engram type"**
+**Question 1 - header: "Engram type"**
 question: "What Engram implementation do you want to use?"
 options:
-1. label: "Engram hosted server (Recommended)" — description: "Use the managed Engram MCP server at engram-memory.com — no installation needed, easiest to get started"
-2. label: "Self-hosted / custom" — description: "You have your own Engram server URL or a local binary you want to connect to"
-3. label: "Walk me through the options and tradeoffs" — description: "Explain the differences before I decide"
-4. label: "Chat about this" — description: "I have a question first"
+1. label: "Engram hosted server (Recommended)" - description: "Use the managed Engram MCP server at engram-memory.com - no installation needed, easiest to get started"
+2. label: "Self-hosted / custom" - description: "You have your own Engram server URL or a local binary you want to connect to"
+3. label: "Walk me through the options and tradeoffs" - description: "Explain the differences before I decide"
+4. label: "Chat about this" - description: "I have a question first"
 
-**Question 2 — header: "Scope"**
+**Question 2 - header: "Scope"**
 question: "Where should Engram be configured?"
 options:
-1. label: "User-level (~/.claude.json) (Recommended)" — description: "Available across all your Claude Code projects, not tied to any single repo"
-2. label: "Project-level (.mcp.json)" — description: "Checked into this repo — all agents working in this directory share the config"
-3. label: "Chat about this" — description: "I have a question first"
+1. label: "User-level (~/.claude.json) (Recommended)" - description: "Available across all your Claude Code projects, not tied to any single repo"
+2. label: "Project-level (.mcp.json)" - description: "Checked into this repo - all agents working in this directory share the config"
+3. label: "Chat about this" - description: "I have a question first"
 
 If the user picks "Walk me through the options" or "Chat about this" on either question, answer their question then re-ask before proceeding.
 
-## Step 3 — Write config
+## Step 3 - Write config
 
-IMPORTANT: The url MUST be exactly https://www.engram-memory.com/mcp — no other domain.
+IMPORTANT: The url MUST be exactly https://www.engram-memory.com/mcp - no other domain.
 
 ### Hosted + User-level (~/.claude.json)
 
@@ -343,17 +346,17 @@ Then merge into ~/.claude.json.
 
 Same as above but write to .mcp.json.
 
-## Step 4 — Next steps
+## Step 4 - Next steps
 
 Tell the user:
 1. Which file was written and what was added
 2. The MCP URL is https://www.engram-memory.com/mcp
 3. To restart Claude Code (or run /mcp) for the change to take effect
-4. Once restarted: call engram_status() — it will guide through engram_init (new workspace) or engram_join (join with invite key)
+4. Once restarted: call engram_status() - it will guide through engram_init (new workspace) or engram_join (join with invite key)
 '@ | Set-Content -LiteralPath $SkillFile -Encoding UTF8
-Write-Host "  ✓ $SkillFile"
+Write-Host "  OK $SkillFile"
 
-# ── Result ─────────────────────────────────────────────────────────
+# --- Result ---
 Write-Host ''
 if ($patched -eq 0) {
     Write-Host 'No MCP clients detected. Manually add to your IDE''s MCP config:'
